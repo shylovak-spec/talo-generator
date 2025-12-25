@@ -124,32 +124,51 @@ if all_selected_data:
                     break
             
             if target_table:
-                # Додаємо товари
-                for item in all_selected_data:
-                    cells = target_table.add_row().cells
-                    cells[0].text = str(item["Найменування"])
-                    cells[1].text = str(item["Кількість"])
-                    cells[2].text = f"{item['Ціна']:,}".replace(',', ' ')
-                    cells[3].text = f"{item['Сума']:,}".replace(',', ' ')
-                
-                # Додаємо підсумки в таблицю
+                # Визначаємо категорії для розділення
+                sections = {
+                    "Обладнання": ["1. Інвертори Deye", "2. Акумулятори (АКБ)"],
+                    "Матеріали": ["3. Комплектуючі та щити"],
+                    "Роботи": ["4. Послуги та Роботи"]
+                }
+
+                for section_name, base_cats in sections.items():
+                    # Відфільтровуємо товари, що належать до поточної секції
+                    section_items = [item for item in all_selected_data if any(cat in item["Найменування"] or cat in EQUIPMENT_BASE and item["Найменування"] in EQUIPMENT_BASE[cat] for cat in base_cats)]
+                    
+                    if section_items:
+                        # Додаємо заголовок розділу (наприклад, "ОБЛАДНАННЯ")
+                        row_head = target_table.add_row().cells
+                        row_head[0].text = section_name.upper()
+                        row_head[0].paragraphs[0].runs[0].bold = True
+                        
+                        # Додаємо товари цього розділу
+                        for item in section_items:
+                            cells = target_table.add_row().cells
+                            cells[0].text = f" - {item['Найменування']}"
+                            cells[1].text = str(item["Кількість"])
+                            cells[2].text = f"{item['Ціна']:,}".replace(',', ' ')
+                            cells[3].text = f"{item['Сума']:,}".replace(',', ' ')
+
+                # --- ПІДСУМКИ (нижче таблиці з товарами) ---
+                # Додаємо порожній рядок для візуального розділення
+                target_table.add_row()
+
                 # Рядок РАЗОМ
                 row_sum = target_table.add_row().cells
                 row_sum[0].text = "РАЗОМ (без податку):"
                 row_sum[3].text = f"{raw_total:,}".replace(',', ' ')
                 row_sum[0].paragraphs[0].runs[0].bold = True
 
-                # Рядок ПОДАТКУ (ПДВ або 6%)
+                # Рядок ПОДАТКУ
                 if t_rate > 0:
                     row_tax = target_table.add_row().cells
                     row_tax[0].text = f"{t_label}:"
                     row_tax[3].text = f"{tax_val:,}".replace(',', ' ')
 
-                # Рядок УСЬОГО
+                # Рядок ЗАГАЛЬНА ВАРТІСТЬ
                 row_final = target_table.add_row().cells
-                row_final[0].text = "УСЬОГО ДО СПЛАТИ З ПОДАТКОМ:"
+                row_final[0].text = "ЗАГАЛЬНА ВАРТІСТЬ З ПОДАТКОМ:"
                 row_final[3].text = f"{final_total:,}".replace(',', ' ')
-                # Робимо фінальний рядок жирним
                 for cell in row_final:
                     if cell.text:
                         for p in cell.paragraphs:
