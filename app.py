@@ -13,13 +13,15 @@ def replace_placeholders(doc, replacements):
         for key, value in replacements.items():
             placeholder = f"{{{{{key}}}}}"
             if placeholder in element.text:
+                # Збираємо текст з усіх фрагментів (runs)
                 full_text = "".join([run.text for run in element.runs])
                 if placeholder in full_text:
                     new_text = full_text.replace(placeholder, str(value))
+                    # Очищаємо фрагменти і записуємо результат у перший
                     for i, run in enumerate(element.runs):
                         if i == 0:
                             run.text = new_text
-                            run.bold = False
+                            run.bold = False  # Текст даних завжди звичайний
                         else:
                             run.text = ""
 
@@ -31,7 +33,7 @@ def replace_placeholders(doc, replacements):
                 for p in cell.paragraphs:
                     process_element(p)
 
-# --- ІНТЕРФЕЙС ---
+# --- ІНТЕРФЕЙС STREAMLIT ---
 st.title("⚡ Генератор КП ТОВ «Тало»")
 
 with st.expander("📌 Основна інформація", expanded=True):
@@ -40,6 +42,12 @@ with st.expander("📌 Основна інформація", expanded=True):
         customer = st.text_input("Замовник", "ОСББ Вишгородська 45")
         address = st.text_input("Адреса об'єкта", "м. Київ, вул. Вишгородська 45")
         kp_num = st.text_input("Номер КП", "1223.25POW-B")
+        # ВИБІР ПОДАТКУ
+        tax_type = st.radio(
+            "Оберіть систему оподаткування:",
+            ["ПДВ (20%)", "Податкове навантаження (6%)", "Без податку"],
+            horizontal=True
+        )
     with col2:
         manager = st.text_input("Відповідальний", "Олексій Крамаренко")
         date_str = st.date_input("Дата", datetime.date.today()).strftime("%d.%m.%Y")
@@ -48,11 +56,11 @@ with st.expander("📌 Основна інформація", expanded=True):
 st.subheader("📝 Технічні умови")
 col_l, col_r = st.columns(2)
 with col_l:
-    txt_intro = st.text_area("Вступ", "Відповідно до наданих даних...")
-    line1 = st.text_input("Пункт 1", "Організація автономного живлення ліфтів...")
+    txt_intro = st.text_area("Вступ", "Відповідно до наданих даних з метою автономного забезпечення роботи ліфта, насосної ХВП, ІТП та освітлення ліфтових холів та фоє пропонуємо наступний комплекс обладнання та робіт.")
+    line1 = st.text_input("Пункт 1", "Організація автономного живлення ліфтів в/п 1000 та 630 кг до 8 годин автономної роботи...")
 with col_r:
-    line2 = st.text_input("Пункт 2", "Організація автономного живлення насосної...")
-    line3 = st.text_input("Пункт 3", "Аварійне освітлення та відеонагляд;")
+    line2 = st.text_input("Пункт 2", "Організація автономного живлення насосної та ІТП від 6-8 годин автономної роботи...")
+    line3 = st.text_input("Пункт 3", "Електрозабезпечення аварійного освітлення, домофона та відеонагляду;")
 
 st.subheader("📦 Специфікація обладнання")
 all_selected_data = []
@@ -62,7 +70,7 @@ tabs = st.tabs(categories)
 for i, cat in enumerate(categories):
     with tabs[i]:
         available_items = EQUIPMENT_BASE[cat]
-        selected_for_cat = st.multiselect(f"Оберіть {cat}:", list(available_items.keys()), key=f"s_{cat}")
+        selected_for_cat = st.multiselect(f"Оберіть товари ({cat}):", list(available_items.keys()), key=f"s_{cat}")
         for item in selected_for_cat:
             c_name, c_qty, c_price, c_total = st.columns([4, 1, 2, 2])
             with c_name: st.write(f"**{item}**")
@@ -75,41 +83,80 @@ for i, cat in enumerate(categories):
                 st.write(f"**{subtotal:,} грн**")
                 all_selected_data.append({"Найменування": item, "Кількість": qty, "Ціна": price, "Сума": subtotal})
 
-# --- КНОПКА ТА ГЕНЕРАЦІЯ ---
+# --- ЛОГІКА ГЕНЕРАЦІЇ ПРИ НАТИСКАННІ КНОПКИ ---
 if all_selected_data:
     st.write("---")
-    total_sum = sum(item["Сума"] for item in all_selected_data)
-    st.header(f"Загальна сума: {total_sum:,} грн")
+    
+    # Попередній розрахунок для відображення на сайті
+    raw_total = sum(item["Сума"] for item in all_selected_data)
+    
+    if tax_type == "ПДВ (20%)":
+        t_rate, t_label = 0.20, "ПДВ (20%)"
+    elif tax_type == "Податкове навантаження (6%)":
+        t_rate, t_label = 0.06, "Податкове навантаження (6%)"
+    else:
+        t_rate, t_label = 0, "Без податку"
+    
+    tax_val = raw_total * t_rate
+    final_total = raw_total + tax_val
+    
+    st.write(f"Сума без податку: {raw_total:,} грн")
+    st.write(f"{t_label}: {tax_val:,} грн")
+    st.header(f"Усього до сплати: {final_total:,} грн")
     
     if st.button("🚀 Сформувати та завантажити Word"):
         try:
             doc = Document("template.docx")
             
-            # 1. Заміна текстів
-            replacements = {
+            # 1. Заміна статичних текстів
+            info = {
                 "customer": customer, "address": address, "kp_num": kp_num,
                 "manager": manager, "date": date_str, "phone": phone,
                 "txt_intro": txt_intro, "line1": line1, "line2": line2, "line3": line3
             }
-            replace_placeholders(doc, replacements)
+            replace_placeholders(doc, info)
             
-            # 2. Пошук та заповнення таблиці
+            # 2. Пошук таблиці та заповнення
             target_table = None
             for table in doc.tables:
-                # Шукаємо таблицю, де в першому рядку є "Найменування"
                 if len(table.rows) > 0 and "Найменування" in table.rows[0].cells[0].text:
                     target_table = table
                     break
             
             if target_table:
+                # Додаємо товари
                 for item in all_selected_data:
                     cells = target_table.add_row().cells
                     cells[0].text = str(item["Найменування"])
                     cells[1].text = str(item["Кількість"])
                     cells[2].text = f"{item['Ціна']:,}".replace(',', ' ')
                     cells[3].text = f"{item['Сума']:,}".replace(',', ' ')
+                
+                # Додаємо підсумки в таблицю
+                # Рядок РАЗОМ
+                row_sum = target_table.add_row().cells
+                row_sum[0].text = "РАЗОМ (без податку):"
+                row_sum[3].text = f"{raw_total:,}".replace(',', ' ')
+                row_sum[0].paragraphs[0].runs[0].bold = True
+
+                # Рядок ПОДАТКУ (ПДВ або 6%)
+                if t_rate > 0:
+                    row_tax = target_table.add_row().cells
+                    row_tax[0].text = f"{t_label}:"
+                    row_tax[3].text = f"{tax_val:,}".replace(',', ' ')
+
+                # Рядок УСЬОГО
+                row_final = target_table.add_row().cells
+                row_final[0].text = "УСЬОГО ДО СПЛАТИ З ПОДАТКОМ:"
+                row_final[3].text = f"{final_total:,}".replace(',', ' ')
+                # Робимо фінальний рядок жирним
+                for cell in row_final:
+                    if cell.text:
+                        for p in cell.paragraphs:
+                            for run in p.runs:
+                                run.bold = True
             
-            # 3. Збереження
+            # 3. Збереження файлу
             output = BytesIO()
             doc.save(output)
             output.seek(0)
@@ -120,5 +167,7 @@ if all_selected_data:
                 file_name=f"KP_Talo_{customer}.docx",
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             )
+            st.success("Документ сформовано успішно!")
+            
         except Exception as e:
-            st.error(f"Помилка: {e}")
+            st.error(f"Виникла помилка: {e}")
