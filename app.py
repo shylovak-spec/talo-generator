@@ -8,31 +8,34 @@ from io import BytesIO
 st.set_page_config(page_title="Talo КП Generator", page_icon="⚡", layout="wide")
 
 # --- ФУНКЦІЯ ЗАМІНИ ТЕКСТУ В WORD ---
-def replace_placeholders(doc, replacements):
-    def process_element(element):
-        for key, value in replacements.items():
-            placeholder = f"{{{{{key}}}}}"
-            if placeholder in element.text:
-                # Склеюємо фрагменти (runs), щоб знайти розірвану мітку
-                full_text = "".join([run.text for run in element.runs])
-                if placeholder in full_text:
-                    new_text = full_text.replace(placeholder, str(value))
-                    # Очищаємо всі фрагменти і записуємо новий текст у перший
-                    for i, run in enumerate(element.runs):
-                        if i == 0:
-                            run.text = new_text
-                            run.bold = False # Дані будуть звичайним шрифтом
-                        else:
-                            run.text = ""
+# --- ОНОВЛЕНА ФУНКЦІЯ ГЕНЕРАЦІЇ ---
+def generate_docx(all_selected_data, info):
+    doc = Document("template.docx")
+    
+    # 1. Заміна тексту (шапка, червона текстовка)
+    replace_placeholders(doc, info)
 
-    # Обробка параграфів та таблиць
-    for p in doc.paragraphs:
-        process_element(p)
+    # 2. Заповнення таблиці специфікації
+    # Шукаємо таблицю, у якій є слово "Найменування" 
+    target_table = None
     for table in doc.tables:
-        for row in table.rows:
-            for cell in row.cells:
-                for p in cell.paragraphs:
-                    process_element(p)
+        if "Найменування" in table.rows[0].cells[0].text:
+            target_table = table
+            break
+
+    if target_table and all_selected_data:
+        for item in all_selected_data:
+            # Додаємо новий рядок в кінець обраної таблиці 
+            cells = target_table.add_row().cells
+            cells[0].text = str(item["Найменування"])
+            cells[1].text = str(item["Кількість"])
+            cells[2].text = f"{item['Ціна']:,}".replace(',', ' ')
+            cells[3].text = f"{item['Сума']:,}".replace(',', ' ')
+    
+    target_file = BytesIO()
+    doc.save(target_file)
+    target_file.seek(0)
+    return target_file
 
 # --- ІНТЕРФЕЙС ПРОГРАМИ ---
 st.title("⚡ Генератор комерційних пропозицій ТОВ «Тало»")
