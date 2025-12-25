@@ -9,31 +9,30 @@ st.set_page_config(page_title="Talo КП Generator", page_icon="⚡", layout="wi
 
 # --- ФУНКЦІЯ ЗАМІНИ ТЕКСТУ В WORD ---
 def replace_placeholders(doc, replacements):
-    # Обробка параграфів
-    for p in doc.paragraphs:
+    def process_element(element):
         for key, value in replacements.items():
             placeholder = f"{{{{{key}}}}}"
-            if placeholder in p.text:
-                for run in p.runs:
-                    if placeholder in run.text:
-                        # Замінюємо мітку
-                        run.text = run.text.replace(placeholder, str(value))
-                        # ПРИМУСОВО робимо вставлений текст НЕ жирним
-                        run.bold = False
+            if placeholder in element.text:
+                # Склеюємо фрагменти (runs), щоб знайти розірвану мітку
+                full_text = "".join([run.text for run in element.runs])
+                if placeholder in full_text:
+                    new_text = full_text.replace(placeholder, str(value))
+                    # Очищаємо всі фрагменти і записуємо новий текст у перший
+                    for i, run in enumerate(element.runs):
+                        if i == 0:
+                            run.text = new_text
+                            run.bold = False # Дані будуть звичайним шрифтом
+                        else:
+                            run.text = ""
 
-    # Обробка таблиць (шапка КП)
+    # Обробка параграфів та таблиць
+    for p in doc.paragraphs:
+        process_element(p)
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
                 for p in cell.paragraphs:
-                    for key, value in replacements.items():
-                        placeholder = f"{{{{{key}}}}}"
-                        if placeholder in p.text:
-                            for run in p.runs:
-                                if placeholder in run.text:
-                                    run.text = run.text.replace(placeholder, str(value))
-                                    # ПРИМУСОВО робимо вставлений текст НЕ жирним
-                                    run.bold = False
+                    process_element(p)
 
 # --- ІНТЕРФЕЙС ПРОГРАМИ ---
 st.title("⚡ Генератор комерційних пропозицій ТОВ «Тало»")
