@@ -9,14 +9,19 @@ st.set_page_config(page_title="Talo КП Generator", page_icon="⚡", layout="wi
 
 # --- ФУНКЦІЯ ЗАМІНИ ТЕКСТУ В WORD ---
 def replace_placeholders(doc, replacements):
-    # 1. Заміна в параграфах
+    # Обробка параграфів
     for p in doc.paragraphs:
         for key, value in replacements.items():
             placeholder = f"{{{{{key}}}}}"
             if placeholder in p.text:
-                p.text = p.text.replace(placeholder, str(value))
-    
-    # 2. Заміна в таблицях (шапка часто там)
+                for run in p.runs:
+                    if placeholder in run.text:
+                        # Замінюємо мітку
+                        run.text = run.text.replace(placeholder, str(value))
+                        # ПРИМУСОВО робимо вставлений текст НЕ жирним
+                        run.bold = False
+
+    # Обробка таблиць (шапка КП)
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
@@ -24,7 +29,11 @@ def replace_placeholders(doc, replacements):
                     for key, value in replacements.items():
                         placeholder = f"{{{{{key}}}}}"
                         if placeholder in p.text:
-                            p.text = p.text.replace(placeholder, str(value))
+                            for run in p.runs:
+                                if placeholder in run.text:
+                                    run.text = run.text.replace(placeholder, str(value))
+                                    # ПРИМУСОВО робимо вставлений текст НЕ жирним
+                                    run.bold = False
 
 # --- ІНТЕРФЕЙС ПРОГРАМИ ---
 st.title("⚡ Генератор комерційних пропозицій ТОВ «Тало»")
