@@ -112,6 +112,17 @@ if all_selected_data:
             
             # Збереження у файл
             target_stream = BytesIO()
+            if all_selected_data:
+    # Зазвичай таблиця зі специфікацією — це друга таблиця в КП (індекс 1)
+    # Якщо товарів багато, код створить нові рядки автоматично
+    table = doc.tables[1] 
+    
+    for item in all_selected_data:
+        cells = table.add_row().cells
+        cells[0].text = str(item["Найменування"])
+        cells[1].text = str(item["Кількість"])
+        cells[2].text = f"{item['Ціна']:,}".replace(',', ' ')
+        cells[3].text = f"{item['Сума']:,}".replace(',', ' ')
             doc.save(target_stream)
             target_stream.seek(0)
             
