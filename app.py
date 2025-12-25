@@ -71,18 +71,35 @@ for i, cat in enumerate(categories):
     with tabs[i]:
         available_items = EQUIPMENT_BASE[cat]
         selected_for_cat = st.multiselect(f"Оберіть товари ({cat}):", list(available_items.keys()), key=f"s_{cat}")
+        
         for item in selected_for_cat:
-            c_name, c_qty, c_price, c_total = st.columns([4, 1, 2, 2])
-            with c_name: st.write(f"**{item}**")
-            with c_qty: qty = st.number_input(f"К-сть", min_value=1, value=1, key=f"q_{item}")
+            # Створюємо 4 колонки: Назва, Кількість, Ціна (редагується), Сума
+            c_name, c_qty, c_price, c_total = st.columns([3, 1, 2, 2])
+            
+            with c_name: 
+                st.write(f"**{item}**")
+            
+            with c_qty: 
+                qty = st.number_input(f"К-сть", min_value=1, value=1, key=f"q_{item}")
+            
             with c_price: 
-                price = available_items[item]
-                st.write(f"{price:,} грн")
+                # Витягуємо ціну з бази за замовчуванням
+                default_price = available_items[item]
+                # Додаємо поле введення, де можна вручну змінити ціну
+                custom_price = st.number_input(f"Ціна, грн", min_value=0, value=int(default_price), key=f"p_{item}")
+            
             with c_total:
-                subtotal = price * qty
-                st.write(f"**{subtotal:,} грн**")
-                all_selected_data.append({"Найменування": item, "Кількість": qty, "Ціна": price, "Сума": subtotal})
-
+                subtotal = custom_price * qty
+                st.write(f"**{subtotal:,} грн**".replace(',', ' '))
+                
+                # Зберігаємо дані в загальний список
+                all_selected_data.append({
+                    "Найменування": item, 
+                    "Кількість": qty, 
+                    "Ціна": custom_price, 
+                    "Сума": subtotal,
+                    "Категорія": cat  # Додаємо категорію для подальшого розділення в таблиці
+                })
 # --- ЛОГІКА ГЕНЕРАЦІЇ ПРИ НАТИСКАННІ КНОПКИ ---
 if all_selected_data:
     st.write("---")
