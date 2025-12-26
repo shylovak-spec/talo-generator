@@ -81,7 +81,7 @@ if "selected_items" not in st.session_state:
 if vendor_choice == "ТОВ «ТАЛО»":
     v_display, v_full, tax_rate, tax_label = "ТОВ «Тало»", "Директор ТОВ «ТАЛО»", 0.20, "ПДВ (20%)"
 else:
-    v_display, v_full, tax_rate, tax_label = "ФОП Крамаренко О.С.", "ФОП Крамаренко О.С.", 0.06, "Податок (6%)"
+    v_display, v_full, tax_rate, tax_label = "ФОП Крамаренко О.С.", "ФОП Крамаренко О.С.", 0.06, "Податкове навантаження (6%)"
 
 tabs = st.tabs(list(EQUIPMENT_BASE.keys()))
 for i, cat in enumerate(EQUIPMENT_BASE.keys()):
@@ -158,9 +158,9 @@ if all_selected_data:
 
             # Фінальні розрахунки
             summary = [
-                ("РАЗОМ:", raw_total, False), 
+                ("РАЗОМ, грн:", raw_total, False), 
                 (f"{tax_label}:", tax_val, False), 
-                ("ЗАГАЛЬНА ВАРТІСТЬ:", final_total, True)
+                ("ЗАГАЛЬНА ВАРТІСТЬ, грн:", final_total, True)
             ]
             for label, val, is_bold in summary:
                 r = target_table.add_row().cells
