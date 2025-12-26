@@ -1,3 +1,4 @@
+FORM_VERSION = "v_final_reset"
 import streamlit as st
 from database import EQUIPMENT_BASE
 import datetime
@@ -64,9 +65,17 @@ with st.expander("📌 Основна інформація", expanded=True):
     manager = col2.text_input("Відповідальний", "Олексій Крамаренко")
     date_str = col2.date_input("Дата", datetime.date.today()).strftime("%d.%m.%Y")
     
-    # Додайте префікс до ключа (наприклад, 'v2_'), щоб скинути пам'ять віджета
-phone = col2.text_input("Телефон", value=curr_phone, key=f"v2_p_field_{v_id}")
-email = col2.text_input("E-mail", value=curr_email, key=f"v2_e_field_{v_id}")
+    # ПРАВИЛЬНО РОЗМІЩЕНІ ПОЛЯ З ДИНАМІЧНИМИ КЛЮЧАМИ
+    phone = col2.text_input(
+        "Телефон", 
+        value=curr_phone, 
+        key=f"{FORM_VERSION}_phone_{v_id}"
+    )
+    email = col2.text_input(
+        "E-mail", 
+        value=curr_email, 
+        key=f"{FORM_VERSION}_email_{v_id}"
+    )
 
 st.subheader("📝 Технічне завдання та опис")
 txt_intro = st.text_area("Вступний текст ({{txt_intro}})", "Відповідно до наданих даних пропонуємо наступне:")
