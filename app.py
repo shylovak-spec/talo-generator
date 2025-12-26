@@ -8,7 +8,7 @@ import re
 
 st.set_page_config(page_title="Talo КП Generator", layout="wide", page_icon="⚡")
 
-# ================== ФУНКЦІЯ ЗАМІНИ (Жирний заголовок : Звичайні дані) ==================
+# ================== ФУНКЦІЯ ЗАМІНИ ==================
 def replace_placeholders(doc, replacements):
     bold_headers = [
         "Виконавець", "Замовник", "Адреса", "Відповідальний",
@@ -36,11 +36,9 @@ def replace_placeholders(doc, replacements):
                 if not is_header:
                     p.add_run(new_text).bold = False
 
-    # Обробка основного тексту
     for p in doc.paragraphs:
         process_paragraph(p)
     
-    # Обробка таблиць (шапка КП)
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
@@ -53,15 +51,30 @@ st.title("⚡ Генератор Комерційних Пропозицій")
 with st.expander("📌 Основна інформація", expanded=True):
     col1, col2 = st.columns(2)
     with col1:
+        # Вибір виконавця спочатку для логіки контактів
         vendor_choice = st.selectbox("Виконавець:", ["ТОВ «ТАЛО»", "ФОП Крамаренко Олексій Сергійович"])
+        
+        # Логіка автоматичних контактів
+        if vendor_choice == "ТОВ «ТАЛО»":
+            v_display, v_full = "ТОВ «Тало»", "Директор ТОВ «ТАЛО»"
+            tax_rate, tax_label = 0.20, "ПДВ (20%)"
+            default_phone = "+380 (67) 477-17-18"
+            default_email = "o.kramarenko@talo.com.ua"
+        else:
+            v_display, v_full = "ФОП Крамаренко О.С.", "ФОП Крамаренко О.С."
+            tax_rate, tax_label = 0.06, "Податкове навантаження (6%)"
+            default_phone = "+380 (50) 443-66-86"
+            default_email = "lesha.kramarenko@gmail.com"
+
         customer = st.text_input("Замовник", "ОСББ Вишгородська 45")
         address = st.text_input("Адреса об'єкта", "м. Київ, вул. Вишгородська 45")
+    
     with col2:
         kp_num = st.text_input("Номер КП", "1223.25POW-B")
         manager = st.text_input("Відповідальний", "Олексій Крамаренко")
         date_str = st.date_input("Дата", datetime.date.today()).strftime("%d.%m.%Y")
-        phone = st.text_input("Телефон", "+380 (67) 477-17-18")
-        email = st.text_input("E-mail", "o.kramarenko@talo.com.ua")
+        phone = st.text_input("Телефон", default_phone)
+        email = st.text_input("E-mail", default_email)
 
 st.subheader("📝 Технічне завдання та опис")
 txt_intro = st.text_area("Вступний текст ({{txt_intro}})", "Відповідно до наданих даних пропонуємо наступне:")
@@ -78,17 +91,11 @@ st.subheader("📦 Специфікація")
 if "selected_items" not in st.session_state:
     st.session_state.selected_items = {}
 
-if vendor_choice == "ТОВ «ТАЛО»":
-    v_display, v_full, tax_rate, tax_label = "ТОВ «Тало»", "Директор ТОВ «ТАЛО»", 0.20, "ПДВ (20%)"
-else:
-    v_display, v_full, tax_rate, tax_label = "ФОП Крамаренко О.С.", "ФОП Крамаренко О.С.", 0.06, "Податкове навантаження (6%)"
-
 tabs = st.tabs(list(EQUIPMENT_BASE.keys()))
 for i, cat in enumerate(EQUIPMENT_BASE.keys()):
     with tabs[i]:
         selected = st.multiselect(f"Обрати товари з {cat}:", list(EQUIPMENT_BASE[cat].keys()), key=f"sel_{cat}")
         
-        # Видалення товарів, з яких зняли галочку
         current_keys = set(f"{cat}_{item}" for item in selected)
         for key in list(st.session_state.selected_items.keys()):
             if key.startswith(f"{cat}_") and key not in current_keys:
@@ -106,7 +113,6 @@ for i, cat in enumerate(EQUIPMENT_BASE.keys()):
                 "Найменування": item, "Кількість": qty, "Ціна": price, "Сума": subtotal, "Категорія": cat
             }
 
-# ================== ПІДСУМКИ ТА ГЕНЕРАЦІЯ ==================
 all_selected_data = list(st.session_state.selected_items.values())
 
 if all_selected_data:
@@ -120,7 +126,6 @@ if all_selected_data:
     if st.button("🚀 Згенерувати та завантажити КП", type="primary", use_container_width=True):
         doc = Document("template.docx")
         
-        # Заміна в тексті
         replace_placeholders(doc, {
             "vendor_name": v_display, "vendor_full_name": v_full,
             "customer": customer, "address": address, "kp_num": kp_num, 
@@ -128,7 +133,6 @@ if all_selected_data:
             "txt_intro": txt_intro, "line1": l1, "line2": l2, "line3": l3
         })
 
-        # Заповнення таблиці
         target_table = next((t for t in doc.tables if "Найменування" in t.rows[0].cells[0].text), None)
         if target_table:
             sections = {
@@ -140,14 +144,10 @@ if all_selected_data:
             for sec, cats in sections.items():
                 items = [x for x in all_selected_data if x["Категорія"] in cats]
                 if items:
-                    # 1. Створюємо новий рядок
                     row = target_table.add_row()
                     row_cells = row.cells
-                    
-                    # 2. Об'єднуємо всі 4 клітинки в одну
                     merged_cell = row_cells[0].merge(row_cells[3])
                     
-                    # 3. Форматуємо текст: Центр, Курсив, НЕ жирний
                     p = merged_cell.paragraphs[0]
                     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     
@@ -155,7 +155,6 @@ if all_selected_data:
                     run.bold = False
                     run.italic = True
                     
-                    # 4. Додаємо товари (цей цикл ТАКОЖ має бути всередині 'if items')
                     for it in items:
                         r = target_table.add_row().cells
                         r[0].text = f" - {it['Найменування']}"
@@ -166,7 +165,6 @@ if all_selected_data:
                         r[3].text = f"{it['Сума']:,}".replace(",", " ")
                         r[3].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
 
-            # Фінальні розрахунки
             summary = [
                 ("РАЗОМ, грн:", raw_total, False), 
                 (f"{tax_label}:", tax_val, False), 
@@ -180,7 +178,6 @@ if all_selected_data:
                     for c in r:
                         for run in c.paragraphs[0].runs: run.bold = True
 
-        # Підготовка файлу
         safe_name = re.sub(r"[^\w\s-]", "", customer)[:25]
         output = BytesIO()
         doc.save(output)
