@@ -46,37 +46,44 @@ def replace_placeholders(doc, replacements):
                     process_paragraph(p)
 
 # ================== ІНТЕРФЕЙС STREAMLIT ==================
+# ================== ІНТЕРФЕЙС STREAMLIT ==================
 st.title("⚡ Генератор Комерційних Пропозицій")
+
+# Ініціалізація значень, якщо вони ще не існують
+if "phone_val" not in st.session_state:
+    st.session_state.phone_val = "+380 (67) 477-17-18"
+if "email_val" not in st.session_state:
+    st.session_state.email_val = "o.kramarenko@talo.com.ua"
+
+# Функція, яка спрацьовує ПРИ ЗМІНІ виконавця
+def update_vendor_contacts():
+    choice = st.session_state.vendor_selector
+    if choice == "ТОВ «ТАЛО»":
+        st.session_state.phone_val = "+380 (67) 477-17-18"
+        st.session_state.email_val = "o.kramarenko@talo.com.ua"
+    else:
+        st.session_state.phone_val = "+380 (50) 443-66-86"
+        st.session_state.email_val = "lesha.kramarenko@gmail.com"
 
 with st.expander("📌 Основна інформація", expanded=True):
     col1, col2 = st.columns(2)
     
-    # 1. Створюємо селектор
+    # Вибір виконавця з параметром on_change
     vendor_choice = col1.selectbox(
         "Виконавець:", 
         ["ТОВ «ТАЛО»", "ФОП Крамаренко Олексій Сергійович"],
-        key="vendor_selector"
+        key="vendor_selector",
+        on_change=update_vendor_contacts
     )
 
-    # 2. Логіка автоматичного визначення даних
+    # Визначення ставок податків (для розрахунків нижче)
     if vendor_choice == "ТОВ «ТАЛО»":
         v_display, v_full = "ТОВ «Тало»", "Директор ТОВ «ТАЛО»"
         tax_rate, tax_label = 0.20, "ПДВ (20%)"
-        target_phone = "+380 (67) 477-17-18"
-        target_email = "o.kramarenko@talo.com.ua"
     else:
         v_display, v_full = "ФОП Крамаренко О.С.", "ФОП Крамаренко О.С."
         tax_rate, tax_label = 0.06, "Податкове навантаження (6%)"
-        target_phone = "+380 (50) 443-66-86"
-        target_email = "lesha.kramarenko@gmail.com"
 
-    # 3. ПРИМУСОВЕ ОНОВЛЕННЯ (це виправить проблему)
-    if "prev_vendor" not in st.session_state or st.session_state.prev_vendor != vendor_choice:
-        st.session_state.phone_val = target_phone
-        st.session_state.email_val = target_email
-        st.session_state.prev_vendor = vendor_choice
-
-    # 4. ВІДМАЛЮВАННЯ ПОЛІВ
     with col1:
         customer = st.text_input("Замовник", "ОСББ Вишгородська 45")
         address = st.text_input("Адреса об'єкта", "м. Київ, вул. Вишгородська 45")
@@ -86,20 +93,9 @@ with st.expander("📌 Основна інформація", expanded=True):
         manager = st.text_input("Відповідальний", "Олексій Крамаренко")
         date_str = st.date_input("Дата", datetime.date.today()).strftime("%d.%m.%Y")
         
-        # Використовуємо value з session_state
-        phone = st.text_input("Телефон", value=st.session_state.phone_val, key="phone_input")
-        email = st.text_input("E-mail", value=st.session_state.email_val, key="email_input")
-        
-        # Оновлюємо session_state, якщо користувач ввів щось вручну
-        st.session_state.phone_val = phone
-        st.session_state.email_val = email
-
-st.subheader("📝 Технічне завдання та опис")
-txt_intro = st.text_area("Вступний текст ({{txt_intro}})", "Відповідно до наданих даних пропонуємо наступне:")
-c1, c2, c3 = st.columns(3)
-with c1: l1 = st.text_input("Пункт 1 ({{line1}})", "Організація автономного живлення ліфтів")
-with c2: l2 = st.text_input("Пункт 2 ({{line2}})", "Організація автономного живлення насосної")
-with c3: l3 = st.text_input("Пункт 3 ({{line3}})", "Аварійне освітлення та відеонагляд")
+        # Поля вводу тепер прив'язані до сесії
+        phone = st.text_input("Телефон", key="phone_val")
+        email = st.text_input("E-mail", key="email_val")
 
 st.divider()
 
