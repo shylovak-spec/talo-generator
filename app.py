@@ -140,10 +140,17 @@ if all_selected_data:
             for sec, cats in sections.items():
                 items = [x for x in all_selected_data if x["Категорія"] in cats]
                 if items:
-                    # Рядок категорії
-                    r = target_table.add_row().cells
-                    r[0].text = sec
-                    for run in r[0].paragraphs[0].runs: run.bold = True
+    # Рядок категорії (ОБЛАДНАННЯ, МАТЕРІАЛИ тощо)
+    row_cells = target_table.add_row().cells
+    
+    # Об'єднуємо всі 4 клітинки в одну для вирівнювання по центру (опціонально, але красиво)
+    # Якщо хочете просто текст у першій клітинці, залиште як було, але з новим форматуванням:
+    p = row_cells[0].paragraphs[0]
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER # Вирівнювання абзацу по центру
+    
+    r = p.add_run(sec)
+    r.bold = False    # НЕ жирний
+    r.italic = True   # КУРСИВ
                     
                     # Товари
                     for it in items:
