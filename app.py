@@ -71,15 +71,11 @@ with st.container():
 if vendor_choice == "ТОВ «ТАЛО»":
     v_name = "ТОВ «ТАЛО»"
     v_full_name = "Директор ТОВ «ТАЛО»"
-    v_details = "ЄДРПОУ 44654511, Платник ПДВ 20%"
-    tax_rate = 0.20
-    tax_label = "ПДВ (20%)"
+    
 else:
     v_name = "ФОП Крамаренко О.С."
     v_full_name = "ФОП Крамаренко Олексій Сергійович"
-    v_details = "ІПН 3244211234, Платник єдиного податку (6%)"
-    tax_rate = 0.06
-    tax_label = "Податкове навантаження (6%)"
+  
 
 st.divider()
 
