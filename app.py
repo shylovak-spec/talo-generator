@@ -51,30 +51,30 @@ st.title("⚡ Генератор Комерційних Пропозицій")
 with st.expander("📌 Основна інформація", expanded=True):
     col1, col2 = st.columns(2)
     with col1:
-        # Вибір виконавця спочатку для логіки контактів
-        vendor_choice = st.selectbox("Виконавець:", ["ТОВ «ТАЛО»", "ФОП Крамаренко Олексій Сергійович"])
-        
-        # Логіка автоматичних контактів
-        if vendor_choice == "ТОВ «ТАЛО»":
-            v_display, v_full = "ТОВ «Тало»", "Директор ТОВ «ТАЛО»"
-            tax_rate, tax_label = 0.20, "ПДВ (20%)"
-            default_phone = "+380 (67) 477-17-18"
-            default_email = "o.kramarenko@talo.com.ua"
-        else:
-            v_display, v_full = "ФОП Крамаренко О.С.", "ФОП Крамаренко О.С."
-            tax_rate, tax_label = 0.06, "Податкове навантаження (6%)"
-            default_phone = "+380 (50) 443-66-86"
-            default_email = "lesha.kramarenko@gmail.com"
-
-        customer = st.text_input("Замовник", "ОСББ Вишгородська 45")
-        address = st.text_input("Адреса об'єкта", "м. Київ, вул. Вишгородська 45")
+    vendor_choice = st.selectbox("Виконавець:", ["ТОВ «ТАЛО»", "ФОП Крамаренко Олексій Сергійович"])
     
-    with col2:
-        kp_num = st.text_input("Номер КП", "1223.25POW-B")
-        manager = st.text_input("Відповідальний", "Олексій Крамаренко")
-        date_str = st.date_input("Дата", datetime.date.today()).strftime("%d.%m.%Y")
-        phone = st.text_input("Телефон", default_phone)
-        email = st.text_input("E-mail", default_email)
+    if vendor_choice == "ТОВ «ТАЛО»":
+        v_display, v_full = "ТОВ «Тало»", "Директор ТОВ «ТАЛО»"
+        tax_rate, tax_label = 0.20, "ПДВ (20%)"
+        default_phone = "+380 (67) 477-17-18"
+        default_email = "o.kramarenko@talo.com.ua"
+    else:
+        v_display, v_full = "ФОП Крамаренко О.С.", "ФОП Крамаренко О.С."
+        tax_rate, tax_label = 0.06, "Податкове навантаження (6%)"
+        default_phone = "+380 (67) 477-17-18"
+        default_email = "lesha.kramarenko@gmail.com"
+
+    customer = st.text_input("Замовник", "ОСББ Вишгородська 45")
+    address = st.text_input("Адреса об'єкта", "м. Київ, вул. Вишгородська 45")
+
+with col2:
+    kp_num = st.text_input("Номер КП", "1223.25POW-B")
+    manager = st.text_input("Відповідальний", "Олексій Крамаренко")
+    date_str = st.date_input("Дата", datetime.date.today()).strftime("%d.%m.%Y")
+    
+    # ВИПРАВЛЕНО ТУТ:
+    phone = st.text_input("Телефон", default_phone, key=f"phone_{vendor_choice}")
+    email = st.text_input("E-mail", default_email, key=f"email_{vendor_choice}")
 
 st.subheader("📝 Технічне завдання та опис")
 txt_intro = st.text_area("Вступний текст ({{txt_intro}})", "Відповідно до наданих даних пропонуємо наступне:")
