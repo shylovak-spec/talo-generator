@@ -64,9 +64,9 @@ with st.expander("📌 Основна інформація", expanded=True):
     manager = col2.text_input("Відповідальний", "Олексій Крамаренко")
     date_str = col2.date_input("Дата", datetime.date.today()).strftime("%d.%m.%Y")
     
-    # Динамічні ключі для миттєвого оновлення
-    phone = col2.text_input("Телефон", value=curr_phone, key=f"p_field_{v_id}")
-    email = col2.text_input("E-mail", value=curr_email, key=f"e_field_{v_id}")
+    # Додайте префікс до ключа (наприклад, 'v2_'), щоб скинути пам'ять віджета
+phone = col2.text_input("Телефон", value=curr_phone, key=f"v2_p_field_{v_id}")
+email = col2.text_input("E-mail", value=curr_email, key=f"v2_e_field_{v_id}")
 
 st.subheader("📝 Технічне завдання та опис")
 txt_intro = st.text_area("Вступний текст ({{txt_intro}})", "Відповідно до наданих даних пропонуємо наступне:")
