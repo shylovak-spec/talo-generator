@@ -14,14 +14,12 @@ def replace_placeholders(doc, replacements):
         "Виконавець", "Замовник", "Адреса", "Відповідальний",
         "Контактний телефон", "E-mail", "Дата", "Комерційна пропозиція"
     ]
-
     def process_paragraph(p):
         for key, value in replacements.items():
             placeholder = f"{{{{{key}}}}}"
             if placeholder in p.text:
                 new_text = p.text.replace(placeholder, str(value))
                 p.clear()
-
                 is_header = False
                 for bh in bold_headers:
                     if new_text.strip().startswith(bh + ":"):
@@ -32,57 +30,40 @@ def replace_placeholders(doc, replacements):
                         r2.bold = False
                         is_header = True
                         break
-                
                 if not is_header:
                     p.add_run(new_text).bold = False
 
-    for p in doc.paragraphs:
-        process_paragraph(p)
-    
+    for p in doc.paragraphs: process_paragraph(p)
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
-                for p in cell.paragraphs:
-                    process_paragraph(p)
+                for p in cell.paragraphs: process_paragraph(p)
 
-# ================== ІНТЕРФЕЙС STREAMLIT ==================
 # ================== ІНТЕРФЕЙС STREAMLIT ==================
 st.title("⚡ Генератор Комерційних Пропозицій")
-
-# Ініціалізація значень, якщо вони ще не існують
-if "phone_val" not in st.session_state:
-    st.session_state.phone_val = "+380 (67) 477-17-18"
-if "email_val" not in st.session_state:
-    st.session_state.email_val = "o.kramarenko@talo.com.ua"
-
-# Функція, яка спрацьовує ПРИ ЗМІНІ виконавця
-def update_vendor_contacts():
-    choice = st.session_state.vendor_selector
-    if choice == "ТОВ «ТАЛО»":
-        st.session_state.phone_val = "+380 (67) 477-17-18"
-        st.session_state.email_val = "o.kramarenko@talo.com.ua"
-    else:
-        st.session_state.phone_val = "+380 (50) 443-66-86"
-        st.session_state.email_val = "lesha.kramarenko@gmail.com"
 
 with st.expander("📌 Основна інформація", expanded=True):
     col1, col2 = st.columns(2)
     
-    # Вибір виконавця з параметром on_change
+    # 1. Вибір виконавця
     vendor_choice = col1.selectbox(
         "Виконавець:", 
-        ["ТОВ «ТАЛО»", "ФОП Крамаренко Олексій Сергійович"],
-        key="vendor_selector",
-        on_change=update_vendor_contacts
+        ["ТОВ «ТАЛО»", "ФОП Крамаренко Олексій Сергійович"]
     )
 
-    # Визначення ставок податків (для розрахунків нижче)
+    # 2. Визначення констант залежно від вибору
     if vendor_choice == "ТОВ «ТАЛО»":
         v_display, v_full = "ТОВ «Тало»", "Директор ТОВ «ТАЛО»"
         tax_rate, tax_label = 0.20, "ПДВ (20%)"
+        default_phone = "+380 (67) 477-17-18"
+        default_email = "o.kramarenko@talo.com.ua"
+        v_id = "talo" # Унікальний ID для ключів
     else:
         v_display, v_full = "ФОП Крамаренко О.С.", "ФОП Крамаренко О.С."
         tax_rate, tax_label = 0.06, "Податкове навантаження (6%)"
+        default_phone = "+380 (50) 443-66-86"
+        default_email = "lesha.kramarenko@gmail.com"
+        v_id = "fop" # Унікальний ID для ключів
 
     with col1:
         customer = st.text_input("Замовник", "ОСББ Вишгородська 45")
@@ -93,9 +74,17 @@ with st.expander("📌 Основна інформація", expanded=True):
         manager = st.text_input("Відповідальний", "Олексій Крамаренко")
         date_str = st.date_input("Дата", datetime.date.today()).strftime("%d.%m.%Y")
         
-        # Поля вводу тепер прив'язані до сесії
-        phone = st.text_input("Телефон", key="phone_val")
-        email = st.text_input("E-mail", key="email_val")
+        # ВИКОРИСТОВУЄМО ДИНАМІЧНІ КЛЮЧІ (v_id додається до key)
+        # Це змушує Streamlit повністю перемалювати віджет при зміні компанії
+        phone = st.text_input("Телефон", value=default_phone, key=f"phone_field_{v_id}")
+        email = st.text_input("E-mail", value=default_email, key=f"email_field_{v_id}")
+
+st.subheader("📝 Технічне завдання та опис")
+txt_intro = st.text_area("Вступний текст ({{txt_intro}})", "Відповідно до наданих даних пропонуємо наступне:")
+c1, c2, c3 = st.columns(3)
+with c1: l1 = st.text_input("Пункт 1 ({{line1}})", "Організація автономного живлення ліфтів")
+with c2: l2 = st.text_input("Пункт 2 ({{line2}})", "Організація автономного живлення насосної")
+with c3: l3 = st.text_input("Пункт 3 ({{line3}})", "Аварійне освітлення та відеонагляд")
 
 st.divider()
 
@@ -109,7 +98,6 @@ tabs = st.tabs(list(EQUIPMENT_BASE.keys()))
 for i, cat in enumerate(EQUIPMENT_BASE.keys()):
     with tabs[i]:
         selected = st.multiselect(f"Обрати товари з {cat}:", list(EQUIPMENT_BASE[cat].keys()), key=f"sel_{cat}")
-        
         current_keys = set(f"{cat}_{item}" for item in selected)
         for key in list(st.session_state.selected_items.keys()):
             if key.startswith(f"{cat}_") and key not in current_keys:
@@ -122,7 +110,6 @@ for i, cat in enumerate(EQUIPMENT_BASE.keys()):
             with cC: price = st.number_input("Ціна, грн", min_value=0, value=int(EQUIPMENT_BASE[cat][item]), key=f"pr_{cat}_{item}")
             subtotal = int(qty * price)
             with cD: st.write(f"**{subtotal:,}** грн".replace(',', ' '))
-            
             st.session_state.selected_items[f"{cat}_{item}"] = {
                 "Найменування": item, "Кількість": qty, "Ціна": price, "Сума": subtotal, "Категорія": cat
             }
@@ -131,7 +118,9 @@ all_selected_data = list(st.session_state.selected_items.values())
 
 if all_selected_data:
     st.divider()
-    raw_total = sum(x["Сума"] for x in all_selected_data)
+    raw_total = sum(x["Суumа"] for x in all_selected_data if "Сума" in x) # Захист від помилок ключа
+    # Перерахунок суми вручну для точності
+    raw_total = sum(item["Кількість"] * item["Ціна"] for item in all_selected_data)
     tax_val = int(round(raw_total * tax_rate))
     final_total = raw_total + tax_val
     
@@ -139,7 +128,6 @@ if all_selected_data:
 
     if st.button("🚀 Згенерувати та завантажити КП", type="primary", use_container_width=True):
         doc = Document("template.docx")
-        
         replace_placeholders(doc, {
             "vendor_name": v_display, "vendor_full_name": v_full,
             "customer": customer, "address": address, "kp_num": kp_num, 
@@ -154,20 +142,15 @@ if all_selected_data:
                 "МАТЕРІАЛИ": ["3. Комплектуючі та щити"],
                 "РОБОТИ ТА ПОСЛУГИ": ["4. Послуги та Роботи"]
             }
-            
             for sec, cats in sections.items():
                 items = [x for x in all_selected_data if x["Категорія"] in cats]
                 if items:
                     row = target_table.add_row()
-                    row_cells = row.cells
-                    merged_cell = row_cells[0].merge(row_cells[3])
-                    
+                    merged_cell = row.cells[0].merge(row.cells[3])
                     p = merged_cell.paragraphs[0]
                     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    
                     run = p.add_run(sec)
-                    run.bold = False
-                    run.italic = True
+                    run.bold, run.italic = False, True
                     
                     for it in items:
                         r = target_table.add_row().cells
@@ -192,14 +175,12 @@ if all_selected_data:
                     for c in r:
                         for run in c.paragraphs[0].runs: run.bold = True
 
-        safe_name = re.sub(r"[^\w\s-]", "", customer)[:25]
         output = BytesIO()
         doc.save(output)
         output.seek(0)
-        
         st.download_button(
             label="✅ Файл готовий! Натисніть для завантаження",
             data=output,
-            file_name=f"KP_{kp_num}_{safe_name}.docx",
+            file_name=f"KP_{kp_num}_{re.sub(r'[^\\w\\s-]', '', customer)[:25]}.docx",
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
