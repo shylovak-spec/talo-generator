@@ -8,7 +8,7 @@ import re
 
 st.set_page_config(page_title="Talo КП Generator", layout="wide")
 
-# --- ФУНКЦІЯ ЗАМІНИ ПЛЕЙСХОЛДЕРІВ ---
+# ================== ЗАМІНА ПЛЕЙСХОЛДЕРІВ ==================
 def replace_placeholders(doc, replacements):
     bold_headers = [
         "Виконавець", "Замовник", "Адреса", "Відповідальний",
@@ -18,20 +18,22 @@ def replace_placeholders(doc, replacements):
     def process_paragraph(p):
         for key, value in replacements.items():
             placeholder = f"{{{{{key}}}}}"
-            if placeholder in p.text:
-                full_text = p.text.replace(placeholder, str(value))
-                p.clear()
+            if placeholder not in p.text:
+                continue
 
-                for bh in bold_headers:
-                    if full_text.strip().startswith(bh + ":"):
-                        left, right = full_text.split(":", 1)
-                        r1 = p.add_run(left + ":")
-                        r1.bold = True
-                        r2 = p.add_run(right)
-                        r2.bold = False
-                        return
+            full_text = p.text.replace(placeholder, str(value))
+            p.clear()
 
-                p.add_run(full_text).bold = False
+            for bh in bold_headers:
+                if full_text.strip().startswith(bh + ":"):
+                    left, right = full_text.split(":", 1)
+                    r1 = p.add_run(left + ":")
+                    r1.bold = True
+                    r2 = p.add_run(right)
+                    r2.bold = False
+                    return
+
+            p.add_run(full_text).bold = False
 
     for p in doc.paragraphs:
         process_paragraph(p)
@@ -42,10 +44,10 @@ def replace_placeholders(doc, replacements):
                 for p in cell.paragraphs:
                     process_paragraph(p)
 
-# --- ІНТЕРФЕЙС ---
+# ================== UI ==================
 st.title("⚡ Генератор КП")
 
-# --- БЛОК 1 ---
+# ---------- БЛОК 1 ----------
 st.subheader("📌 Основна інформація")
 col1, col2 = st.columns(2)
 
@@ -66,8 +68,9 @@ with col2:
 
 st.divider()
 
-# --- БЛОК 2 ---
+# ---------- БЛОК 2 ----------
 st.subheader("📝 Технічне завдання та опис")
+
 txt_intro = st.text_area(
     "Вступний текст ({{txt_intro}})",
     "Відповідно до наданих даних пропонуємо наступне:"
@@ -83,7 +86,7 @@ with c3:
 
 st.divider()
 
-# --- БЛОК 3 ---
+# ---------- БЛОК 3 ----------
 st.subheader("📦 Специфікація")
 
 if vendor_choice == "ТОВ «ТАЛО»":
@@ -91,8 +94,8 @@ if vendor_choice == "ТОВ «ТАЛО»":
 else:
     v_display, v_full, tax_rate, tax_label = "ФОП Крамаренко О.С.", "ФОП Крамаренко О.С.", 0.06, "Податок (6%)"
 
-# --- СХОВИЩЕ ДАНИХ ---
-st.session_state.setdefault("items", {})
+# ---------- СХОВИЩЕ ----------
+st.session_state.setdefault("selected_items", {})
 
 tabs = st.tabs(list(EQUIPMENT_BASE.keys()))
 
@@ -105,12 +108,12 @@ for i, cat in enumerate(EQUIPMENT_BASE.keys()):
         )
 
         for item in selected:
-            col_a, col_b, col_c, col_d = st.columns([3, 1, 2, 2])
+            cA, cB, cC, cD = st.columns([3, 1, 2, 2])
 
-            with col_a:
+            with cA:
                 st.write(f"**{item}**")
 
-            with col_b:
+            with cB:
                 qty = st.number_input(
                     "К-сть",
                     min_value=1,
@@ -118,7 +121,7 @@ for i, cat in enumerate(EQUIPMENT_BASE.keys()):
                     key=f"qty_{cat}_{item}"
                 )
 
-            with col_c:
+            with cC:
                 price = st.number_input(
                     "Ціна, грн",
                     min_value=0,
@@ -128,10 +131,10 @@ for i, cat in enumerate(EQUIPMENT_BASE.keys()):
 
             subtotal = int(qty * price)
 
-            with col_d:
+            with cD:
                 st.write(f"**{subtotal:,}** грн")
 
-            st.session_state.items[f"{cat}__{item}"] = {
+            st.session_state.selected_items[f"{cat}__{item}"] = {
                 "Найменування": item,
                 "Кількість": qty,
                 "Ціна": price,
@@ -139,9 +142,10 @@ for i, cat in enumerate(EQUIPMENT_BASE.keys()):
                 "Категорія": cat
             }
 
-all_selected_data = list(st.session_state.items.values())
+# ---------- ДАНІ ----------
+all_selected_data = list(st.session_state.selected_items.values())
 
-# --- ПІДСУМКИ ---
+# ---------- ПІДСУМКИ ----------
 if all_selected_data:
     raw_total = sum(x["Сума"] for x in all_selected_data)
     tax_val = round(raw_total * tax_rate)
@@ -215,8 +219,8 @@ if all_selected_data:
         safe_customer = re.sub(r"[^\w\s-]", "", customer)[:20]
         file_name = f"KP_{kp_num}_{safe_customer}.docx"
 
-        buffer = BytesIO()
-        doc.save(buffer)
-        buffer.seek(0)
+        output = BytesIO()
+        doc.save(output)
+        output.seek(0)
 
-        st.download_button("📥 ЗАВАНТАЖИТИ КП", buffer, file_name)
+        st.download_button("📥 ЗАВАНТАЖИТИ КП", output, file_name)
