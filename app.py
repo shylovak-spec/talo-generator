@@ -89,17 +89,24 @@ for i, cat in enumerate(EQUIPMENT_BASE.keys()):
             with c2: qty = st.number_input("К-сть", min_value=1, value=1, key=f"q_{item}")
             with c3: price = st.number_input("Ціна, грн", min_value=0, value=int(EQUIPMENT_BASE[cat][item]), key=f"p_{item}")
             with c4:
-                subtotal = qty * price
+                # Розрахунок рядка
+                subtotal = int(qty * price)
                 st.write(f"**{subtotal:,}** грн")
-                all_selected_data.append({"Найменування": item, "Кількість": qty, "Ціна": price, "Сума": subtotal, "Категорія": cat})
+                all_selected_data.append({
+                    "Найменування": item, 
+                    "Кількість": qty, 
+                    "Ціна": price, 
+                    "Сума": subtotal, 
+                    "Категорія": cat
+                })
 
 if all_selected_data:
     st.divider()
     
     # --- МАТЕМАТИЧНЕ ЗАОКРУГЛЕННЯ ---
-    raw_total = sum(item["Суma"] for item in all_selected_data)
-    tax_val = round(raw_total * tax_rate, 2)
-    final_total = round(raw_total + tax_val, 2)
+    raw_total = sum(item["Сума"] for item in all_selected_data)
+    tax_val = round(raw_total * tax_rate, 0) # заокруглюємо до цілого для чистоти
+    final_total = int(raw_total + tax_val)
 
     st.write(f"Сума: **{raw_total:,}** грн")
     st.write(f"{tax_label}: **{tax_val:,}** грн")
@@ -109,10 +116,18 @@ if all_selected_data:
         doc = Document("template.docx")
         
         info = {
-            "vendor_name": v_display, "vendor_full_name": v_full_name,
-            "customer": customer, "address": address, "kp_num": kp_num, 
-            "manager": manager, "date": date_str, "phone": phone,
-            "txt_intro": txt_intro, "line1": l1, "line2": l2, "line3": l3
+            "vendor_name": v_display, 
+            "vendor_full_name": v_full_name,
+            "customer": customer, 
+            "address": address, 
+            "kp_num": kp_num, 
+            "manager": manager, 
+            "date": date_str, 
+            "phone": phone,
+            "txt_intro": txt_intro, 
+            "line1": l1, 
+            "line2": l2, 
+            "line3": l3
         }
         replace_placeholders(doc, info)
 
@@ -136,13 +151,13 @@ if all_selected_data:
                         cells[2].text = f"{it['Ціна']:,}".replace(',', ' ')
                         cells[3].text = f"{it['Сума']:,}".replace(',', ' ')
 
-            # Фінальні рядки в таблиці з заокругленням
+            # Фінальні рядки в таблиці
             target_table.add_row()
             r1 = target_table.add_row().cells
             r1[0].text, r1[3].text = "РАЗОМ (без податку):", f"{raw_total:,}".replace(',', ' ')
             
             r2 = target_table.add_row().cells
-            r2[0].text, r2[3].text = f"{tax_label}:", f"{tax_val:,}".replace(',', ' ')
+            r2[0].text, r2[3].text = f"{tax_label}:", f"{int(tax_val):,}".replace(',', ' ')
             
             r3 = target_table.add_row().cells
             r3[0].text, r3[3].text = "ЗАГАЛЬНА ВАРТІСТЬ:", f"{final_total:,}".replace(',', ' ')
