@@ -3,12 +3,12 @@ import pandas as pd
 from database import EQUIPMENT_BASE
 import datetime
 from docx import Document
-from docx.io import BytesIO
+from io import BytesIO 
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 st.set_page_config(page_title="Talo КП Generator", page_icon="⚡", layout="wide")
 
-# --- РОЗУМНА ФУНКЦІЯ ЗАМІНИ (Форматування заголовків та склеювання) ---
+# --- ФУНКЦІЯ ЗАМІНИ (Склеювання + Жирний/Звичайний текст) ---
 def replace_placeholders(doc, replacements):
     for p in doc.paragraphs:
         for key, value in replacements.items():
@@ -17,18 +17,18 @@ def replace_placeholders(doc, replacements):
                 full_text = "".join([run.text for run in p.runs])
                 if placeholder in full_text:
                     new_text = full_text.replace(placeholder, str(value))
-                    for i, run in enumerate(p.runs):
-                        if i == 0:
-                            run.text = new_text
-                            # Якщо в тексті є двокрапка, робимо все після неї звичайним
-                            if ":" in run.text:
-                                parts = run.text.split(":", 1)
-                                run.text = parts[0] + ":"
-                                run.bold = True # Заголовок залишається жирним
-                                new_run = p.add_run(parts[1])
-                                new_run.bold = False # Дані стають звичайними
-                        else:
-                            run.text = ""
+                    # Повністю очищаємо абзац
+                    p.clear() 
+                    
+                    if ":" in new_text:
+                        header, data = new_text.split(":", 1)
+                        r1 = p.add_run(header + ":")
+                        r1.bold = True
+                        r2 = p.add_run(data)
+                        r2.bold = False
+                    else:
+                        r = p.add_run(new_text)
+                        r.bold = False
 
     for table in doc.tables:
         for row in table.rows:
@@ -39,13 +39,10 @@ def replace_placeholders(doc, replacements):
                         if placeholder in p.text:
                             full_text = "".join([run.text for run in p.runs])
                             if placeholder in full_text:
-                                new_text = full_text.replace(placeholder, str(value))
-                                for i, run in enumerate(p.runs):
-                                    if i == 0:
-                                        run.text = new_text
-                                        run.bold = False
-                                    else:
-                                        run.text = ""
+                                final_val = full_text.replace(placeholder, str(value))
+                                p.clear()
+                                r = p.add_run(final_val)
+                                r.bold = False
 
 # --- ІНТЕРФЕЙС ---
 st.title("⚡ Генератор КП")
@@ -70,12 +67,6 @@ else:
     v_display, v_full = "ФОП Крамаренко О.С.", "ФОП Крамаренко Олексій Сергійович"
     tax_rate, tax_label = 0.06, "Податкове навантаження (6%)"
 
-st.subheader("📝 Технічні умови")
-txt_intro = st.text_area("Вступ", "Відповідно до наданих даних пропонуємо наступне...")
-l1 = st.text_input("Пункт 1", "Організація автономного живлення ліфтів...")
-l2 = st.text_input("Пункт 2", "Організація автономного живлення насосної...")
-l3 = st.text_input("Пункт 3", "Аварійне освітлення та відеонагляд;")
-
 st.subheader("📦 Специфікація")
 all_selected_data = []
 tabs = st.tabs(list(EQUIPMENT_BASE.keys()))
@@ -93,9 +84,9 @@ for i, cat in enumerate(EQUIPMENT_BASE.keys()):
                 all_selected_data.append({"Найменування": item, "Кількість": qty, "Ціна": price, "Сума": subtotal, "Категорія": cat})
 
 if all_selected_data:
-    st.divider()
-    raw_total = sum(item["Сума"] for item in all_selected_data)
-    tax_val = round(raw_total * tax_rate, 0)
+    # Розрахунки з приведенням до цілих чисел
+    raw_total = int(sum(item["Сума"] for item in all_selected_data))
+    tax_val = int(round(raw_total * tax_rate, 0))
     final_total = int(raw_total + tax_val)
 
     if st.button("🚀 Згенерувати КП"):
@@ -104,7 +95,7 @@ if all_selected_data:
             "vendor_name": v_display, "vendor_full_name": v_full,
             "customer": customer, "address": address, "kp_num": kp_num, 
             "manager": manager, "date": date_str, "phone": phone,
-            "txt_intro": txt_intro, "line1": l1, "line2": l2, "line3": l3
+            "date": date_str # Дублюємо для надійності
         }
         replace_placeholders(doc, info)
 
@@ -120,16 +111,24 @@ if all_selected_data:
                     for it in items:
                         cells = target_table.add_row().cells
                         cells[0].text = f" - {it['Найменування']}"
+                        
                         cells[1].text = str(it['Кількість'])
-                        cells[1].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER # Вирівнювання К-сть
+                        cells[1].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        
                         cells[2].text = f"{it['Ціна']:,}".replace(',', ' ')
-                        cells[2].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT # Вирівнювання Ціна
+                        cells[2].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                        
                         cells[3].text = f"{it['Сума']:,}".replace(',', ' ')
-                        cells[3].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT # Вирівнювання Сума
+                        cells[3].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
 
-            # Підсумки
             target_table.add_row()
-            for label, val, is_bold in [("РАЗОМ (без податку):", raw_total, False), (f"{tax_label}:", int(tax_val), False), ("ЗАГАЛЬНА ВАРТІСТЬ:", final_total, True)]:
+            # Підсумки без крапок і нулів після коми
+            summary_rows = [
+                ("РАЗОМ, грн:", raw_total, False),
+                (f"{tax_label}:", tax_val, False),
+                ("УСЬОГО ДО СПЛАТИ З ПДВ, грн:", final_total, True)
+            ]
+            for label, val, is_bold in summary_rows:
                 r = target_table.add_row().cells
                 r[0].text, r[3].text = label, f"{val:,}".replace(',', ' ')
                 r[3].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
@@ -137,8 +136,10 @@ if all_selected_data:
                     for c in r: 
                         if c.text: c.paragraphs[0].runs[0].bold = True
 
-        # Назва файлу: Номер КП + Адреса
-        file_name = f"KP_{kp_num}_{address}.docx".replace("/", "_").replace("\\", "_")
+        # Генерація назви файлу
+        clean_address = address.replace("/", "_").replace("\\", "_")
+        file_name = f"KP_{kp_num}_{clean_address}.docx"
+        
         output = BytesIO()
         doc.save(output)
         output.seek(0)
