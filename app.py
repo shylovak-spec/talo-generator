@@ -7,69 +7,83 @@ from io import BytesIO
 
 st.set_page_config(page_title="Talo КП Generator", page_icon="⚡", layout="wide")
 
-# --- ФУНКЦІЯ ЗАМІНИ МІТОК ---
+# --- РОЗУМНА ФУНКЦІЯ ЗАМІНИ (Зберігає жирний шрифт заголовків) ---
 def replace_placeholders(doc, replacements):
-    def process_element(element):
+    for p in doc.paragraphs:
         for key, value in replacements.items():
             placeholder = f"{{{{{key}}}}}"
-            if placeholder in element.text:
-                full_text = "".join([run.text for run in element.runs])
-                if placeholder in full_text:
-                    new_text = full_text.replace(placeholder, str(value))
-                    for i, run in enumerate(element.runs):
-                        if i == 0:
-                            run.text = new_text
-                        else:
-                            run.text = ""
+            if placeholder in p.text:
+                for run in p.runs:
+                    if placeholder in run.text:
+                        run.text = run.text.replace(placeholder, str(value))
+                        run.bold = False  # Робимо текст самих даних звичайним
 
-    for p in doc.paragraphs: process_element(p)
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
-                for p in cell.paragraphs: process_element(p)
+                for p in cell.paragraphs:
+                    for key, value in replacements.items():
+                        placeholder = f"{{{{{key}}}}}"
+                        if placeholder in p.text:
+                            for run in p.runs:
+                                if placeholder in run.text:
+                                    run.text = run.text.replace(placeholder, str(value))
+                                    run.bold = False
 
-# --- ІНТЕРФЕЙС ---
-st.title("⚡ Генератор КП")
+# --- ІНТЕРФЕЙС STREAMLIT ---
+st.title("⚡ Генератор КП ТОВ «Тало»")
 
-with st.expander("📌 Основна інформація", expanded=True):
-    col1, col2 = st.columns(2)
-    with col1:
-        # ВИБІР ВИКОНАВЦЯ (Випадайка)
+with st.container():
+    col_main1, col_main2 = st.columns(2)
+    
+    with col_main1:
+        st.subheader("📋 Дані замовлення")
+        customer = st.text_input("Замовник", "ОСББ Вишгородська 45")
+        address = st.text_input("Адреса об'єкта", "м. Київ, вул. Вишгородська 45")
+        kp_num = st.text_input("Номер КП", "1223.25POW-B")
+        date_str = st.date_input("Дата", datetime.date.today()).strftime("%d.%m.%Y")
+
+    with col_main2:
+        st.subheader("🏢 Виконавець")
+        # Випадайка для вибору Виконавця
         vendor_choice = st.selectbox(
             "Оберіть Виконавця:",
             ["ТОВ «ТАЛО»", "ФОП Крамаренко Олексій Сергійович"]
         )
-        customer = st.text_input("Замовник", "ОСББ Вишгородська 45")
-        address = st.text_input("Адреса об'єкта", "м. Київ, вул. Вишгородська 45")
-    
-    with col2:
-        kp_num = st.text_input("Номер КП", "1223.25POW-B")
         manager = st.text_input("Відповідальний", "Олексій Крамаренко")
-        date_str = st.date_input("Дата", datetime.date.today()).strftime("%d.%m.%Y")
+        phone = st.text_input("Контактний телефон", "+380 (67) 477-17-18")
 
-# Логіка оподаткування на основі вибору виконавця
+# Логіка реквізитів та податків
 if vendor_choice == "ТОВ «ТАЛО»":
-    vendor_display_name = "ТОВ «ТАЛО»"
+    v_name = "ТОВ «ТАЛО»"
+    v_full_name = "Директор ТОВ «ТАЛО»"
+    v_details = "ЄДРПОУ 44654511, Платник ПДВ 20%"
     tax_rate = 0.20
     tax_label = "ПДВ (20%)"
 else:
-    vendor_display_name = "ФОП Крамаренко О.С."
+    v_name = "ФОП Крамаренко О.С."
+    v_full_name = "ФОП Крамаренко Олексій Сергійович"
+    v_details = "ІПН 3244211234, Платник єдиного податку (6%)"
     tax_rate = 0.06
     tax_label = "Податкове навантаження (6%)"
 
-st.subheader("📝 Технічні умови (Опис)")
-txt_intro = st.text_area("Вступ", "Відповідно до наданих даних...")
-l1 = st.text_input("Пункт 1", "Автономне живлення ліфтів...")
-l2 = st.text_input("Пункт 2", "Автономне живлення насосної...")
+st.divider()
+
+# Блок технічних умов
+st.subheader("📝 Технічні умови")
+txt_intro = st.text_area("Вступний опис", "Відповідно до наданих даних...")
+l1 = st.text_input("Пункт 1", "Організація автономного живлення ліфтів...")
+l2 = st.text_input("Пункт 2", "Організація автономного живлення насосної...")
 l3 = st.text_input("Пункт 3", "Аварійне освітлення та відеонагляд;")
 
+# Специфікація обладнання
 st.subheader("📦 Специфікація")
 all_selected_data = []
 tabs = st.tabs(list(EQUIPMENT_BASE.keys()))
 
 for i, cat in enumerate(EQUIPMENT_BASE.keys()):
     with tabs[i]:
-        selected = st.multiselect(f"Додати з розділу {cat}:", list(EQUIPMENT_BASE[cat].keys()), key=f"sel_{i}")
+        selected = st.multiselect(f"Оберіть товари ({cat}):", list(EQUIPMENT_BASE[cat].keys()), key=f"s_{i}")
         for item in selected:
             c1, c2, c3, c4 = st.columns([3, 1, 2, 2])
             with c1: st.write(f"**{item}**")
@@ -80,44 +94,37 @@ for i, cat in enumerate(EQUIPMENT_BASE.keys()):
                 st.write(f"**{subtotal:,}** грн")
                 all_selected_data.append({"Найменування": item, "Кількість": qty, "Ціна": price, "Сума": subtotal, "Категорія": cat})
 
+# Кнопка генерації
 if all_selected_data:
-    st.divider()
     raw_total = sum(item["Сума"] for item in all_selected_data)
     tax_val = raw_total * tax_rate
     final_total = raw_total + tax_val
 
-    st.write(f"Виконавець: **{vendor_display_name}**")
-    st.write(f"Сума: {raw_total:,} грн | {tax_label}: {tax_val:,} грн")
-    st.header(f"Усього: {final_total:,} грн")
-
-    if st.button("🚀 Згенерувати КП"):
+    if st.button("🚀 Сформувати та завантажити Word"):
         doc = Document("template.docx")
         
-        # 1. Заміна текстів (Включаючи нового виконавця)
         info = {
-            "vendor_name": vendor_display_name,
-            "customer": customer, "address": address, "kp_num": kp_num,
-            "manager": manager, "date": date_str,
-            "txt_intro": txt_intro, "line1": l1, "line2": l2, "line3": l3
+            "vendor_name": v_name, "vendor_full_name": v_full_name, "vendor_details": v_details,
+            "customer": customer, "address": address, "kp_num": kp_num, "date": date_str,
+            "manager": manager, "phone": phone, "txt_intro": txt_intro, 
+            "line1": l1, "line2": l2, "line3": l3
         }
         replace_placeholders(doc, info)
 
-        # 2. Пошук та заповнення таблиці
+        # Таблиця
         target_table = next((t for t in doc.tables if "Найменування" in t.rows[0].cells[0].text), None)
         if target_table:
-            # Секції (Обладнання, Матеріали, Роботи)
             sections = {
                 "ОБЛАДНАННЯ": ["1. Інвертори Deye", "2. Акумулятори (АКБ)"],
                 "МАТЕРІАЛИ": ["3. Комплектуючі та щити"],
                 "РОБОТИ ТА ПОСЛУГИ": ["4. Послуги та Роботи"]
             }
-            
             for sec_name, cats in sections.items():
                 items = [x for x in all_selected_data if x["Категорія"] in cats]
                 if items:
-                    row_h = target_table.add_row().cells
-                    row_h[0].text = sec_name
-                    row_h[0].paragraphs[0].runs[0].bold = True
+                    row = target_table.add_row().cells
+                    row[0].text = sec_name
+                    row[0].paragraphs[0].runs[0].bold = True
                     for it in items:
                         cells = target_table.add_row().cells
                         cells[0].text = f" - {it['Найменування']}"
@@ -125,14 +132,12 @@ if all_selected_data:
                         cells[2].text = f"{it['Ціна']:,}".replace(',', ' ')
                         cells[3].text = f"{it['Сума']:,}".replace(',', ' ')
 
-            # Підсумки в таблиці
-            target_table.add_row() # Порожній рядок
+            # Підсумки
+            target_table.add_row()
             r1 = target_table.add_row().cells
             r1[0].text, r1[3].text = "РАЗОМ (без податку):", f"{raw_total:,}".replace(',', ' ')
-            
             r2 = target_table.add_row().cells
             r2[0].text, r2[3].text = f"{tax_label}:", f"{tax_val:,}".replace(',', ' ')
-            
             r3 = target_table.add_row().cells
             r3[0].text, r3[3].text = "ЗАГАЛЬНА ВАРТІСТЬ:", f"{final_total:,}".replace(',', ' ')
             for cell in r3:
