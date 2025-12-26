@@ -140,19 +140,22 @@ if all_selected_data:
             for sec, cats in sections.items():
                 items = [x for x in all_selected_data if x["Категорія"] in cats]
                 if items:
-    # Рядок категорії (ОБЛАДНАННЯ, МАТЕРІАЛИ тощо)
-    row_cells = target_table.add_row().cells
-    
-    # Об'єднуємо всі 4 клітинки в одну для вирівнювання по центру (опціонально, але красиво)
-    # Якщо хочете просто текст у першій клітинці, залиште як було, але з новим форматуванням:
-    p = row_cells[0].paragraphs[0]
-    p.alignment = WD_ALIGN_PARAGRAPH.CENTER # Вирівнювання абзацу по центру
-    
-    r = p.add_run(sec)
-    r.bold = False    # НЕ жирний
-    r.italic = True   # КУРСИВ
+                    # 1. Створюємо новий рядок
+                    row = target_table.add_row()
+                    row_cells = row.cells
                     
-                    # Товари
+                    # 2. Об'єднуємо всі 4 клітинки в одну
+                    merged_cell = row_cells[0].merge(row_cells[3])
+                    
+                    # 3. Форматуємо текст: Центр, Курсив, НЕ жирний
+                    p = merged_cell.paragraphs[0]
+                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    
+                    run = p.add_run(sec)
+                    run.bold = False
+                    run.italic = True
+                    
+                    # 4. Додаємо товари (цей цикл ТАКОЖ має бути всередині 'if items')
                     for it in items:
                         r = target_table.add_row().cells
                         r[0].text = f" - {it['Найменування']}"
