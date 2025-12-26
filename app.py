@@ -9,35 +9,31 @@ st.set_page_config(page_title="Talo КП Generator", layout="wide")
 
 # --- ФУНКЦІЯ ЗАМІНИ (Жирний заголовок + Звичайні дані) ---
 def replace_placeholders(doc, replacements):
-    # Поля, які ми хочемо бачити жирними до двокрапки
-    bold_headers = ["Виконавець", "Замовник", "Адреса", "Відповідальний", "Контактний телефон", "E-mail", "Дата", "Номер КП"]
+    # Чіткий список заголовків для жирного виділення
+    bold_headers = ["Виконавець", "Замовник", "Адреса", "Відповідальний", "Контактний телефон", "E-mail", "Дата", "Комерційна пропозиція"]
 
     for p in doc.paragraphs:
         for key, value in replacements.items():
             placeholder = f"{{{{{key}}}}}"
             if placeholder in p.text:
-                # Отримуємо повний текст абзацу з заміненою міткою
                 full_text = p.text.replace(placeholder, str(value))
-                p.clear() # Очищаємо, щоб задати нове форматування
+                p.clear() 
 
-                # Перевіряємо, чи є в цьому рядку один із наших заголовків
-                header_found = False
-                for hh in bold_headers:
-                    if hh in full_text and ":" in full_text:
+                is_header = False
+                for bh in bold_headers:
+                    if bh in full_text and ":" in full_text:
                         parts = full_text.split(":", 1)
                         r1 = p.add_run(parts[0] + ":")
                         r1.bold = True
                         r2 = p.add_run(parts[1])
                         r2.bold = False
-                        header_found = True
+                        is_header = True
                         break
                 
-                # Якщо це не заголовок (наприклад, пункт опису), робимо просто звичайним
-                if not header_found:
+                if not is_header:
                     r = p.add_run(full_text)
                     r.bold = False
 
-    # Обробка таблиць
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
@@ -52,7 +48,9 @@ def replace_placeholders(doc, replacements):
 # --- ІНТЕРФЕЙС ---
 st.title("⚡ Генератор КП")
 
-with st.expander("📌 Реквізити та Контакти", expanded=True):
+# БЛОК 1: Реквізити
+with st.container():
+    st.subheader("📌 Основна інформація")
     col1, col2 = st.columns(2)
     with col1:
         vendor_choice = st.selectbox("Виконавець:", ["ТОВ «ТАЛО»", "ФОП Крамаренко Олексій Сергійович"])
@@ -62,22 +60,31 @@ with st.expander("📌 Реквізити та Контакти", expanded=True)
         kp_num = st.text_input("Номер КП", "1223.25POW-B")
         manager = st.text_input("Відповідальний", "Олексій Крамаренко")
         date_str = st.date_input("Дата", datetime.date.today()).strftime("%d.%m.%Y")
-        phone = st.text_input("Контактний телефон", "+380 (67) 477-17-18")
+        phone = st.text_input("Телефон", "+380 (67) 477-17-18")
         email = st.text_input("E-mail", "o.kramarenko@talo.com.ua")
 
-st.subheader("📝 Технічний опис (пункти в КП)")
+st.divider()
+
+# БЛОК 2: ТЕХНІЧНИЙ ОПИС (Те що зникало)
+st.subheader("📝 Технічне завдання та опис")
 txt_intro = st.text_area("Вступний текст ({{txt_intro}})", "Відповідно до наданих даних пропонуємо наступне:")
 col_l1, col_l2, col_l3 = st.columns(3)
-with col_l1: l1 = st.text_input("Пункт 1 ({{line1}})", "Організація автономного живлення ліфтів")
-with col_l2: l2 = st.text_input("Пункт 2 ({{line2}})", "Організація автономного живлення насосної")
-with col_l3: l3 = st.text_input("Пункт 3 ({{line3}})", "Аварійне освітлення та відеонагляд")
+with col_l1:
+    l1 = st.text_input("Пункт 1 ({{line1}})", "Організація автономного живлення ліфтів")
+with col_l2:
+    l2 = st.text_input("Пункт 2 ({{line2}})", "Організація автономного живлення насосної")
+with col_l3:
+    l3 = st.text_input("Пункт 3 ({{line3}})", "Аварійне освітлення та відеонагляд")
 
+st.divider()
+
+# БЛОК 3: Специфікація
+st.subheader("📦 Специфікація")
 if vendor_choice == "ТОВ «ТАЛО»":
     v_display, v_full, tax_rate, tax_label = "ТОВ «Тало»", "Директор ТОВ «ТАЛО»", 0.20, "ПДВ (20%)"
 else:
     v_display, v_full, tax_rate, tax_label = "ФОП Крамаренко О.С.", "ФОП Крамаренко О.С.", 0.06, "Податок (6%)"
 
-st.subheader("📦 Специфікація")
 all_selected_data = []
 tabs = st.tabs(list(EQUIPMENT_BASE.keys()))
 for i, cat in enumerate(EQUIPMENT_BASE.keys()):
@@ -128,7 +135,8 @@ if all_selected_data:
                         cells[3].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
 
             target_table.add_row()
-            for label, val, is_bold in [("РАЗОМ (без ПДВ):", raw_total, False), (f"{tax_label}:", tax_val, False), ("ЗАГАЛЬНА ВАРТІСТЬ:", final_total, True)]:
+            summary_rows = [("РАЗОМ (без ПДВ):", raw_total, False), (f"{tax_label}:", tax_val, False), ("ЗАГАЛЬНА ВАРТІСТЬ:", final_total, True)]
+            for label, val, is_bold in summary_rows:
                 r = target_table.add_row().cells
                 r[0].text, r[3].text = label, f"{val:,}".replace(',', ' ')
                 r[3].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
