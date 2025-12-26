@@ -50,31 +50,49 @@ st.title("⚡ Генератор Комерційних Пропозицій")
 
 with st.expander("📌 Основна інформація", expanded=True):
     col1, col2 = st.columns(2)
-    with col1:
-    vendor_choice = st.selectbox("Виконавець:", ["ТОВ «ТАЛО»", "ФОП Крамаренко Олексій Сергійович"])
     
+    # 1. Створюємо селектор
+    vendor_choice = col1.selectbox(
+        "Виконавець:", 
+        ["ТОВ «ТАЛО»", "ФОП Крамаренко Олексій Сергійович"],
+        key="vendor_selector"
+    )
+
+    # 2. Логіка автоматичного визначення даних
     if vendor_choice == "ТОВ «ТАЛО»":
         v_display, v_full = "ТОВ «Тало»", "Директор ТОВ «ТАЛО»"
         tax_rate, tax_label = 0.20, "ПДВ (20%)"
-        default_phone = "+380 (67) 477-17-18"
-        default_email = "o.kramarenko@talo.com.ua"
+        target_phone = "+380 (67) 477-17-18"
+        target_email = "o.kramarenko@talo.com.ua"
     else:
         v_display, v_full = "ФОП Крамаренко О.С.", "ФОП Крамаренко О.С."
         tax_rate, tax_label = 0.06, "Податкове навантаження (6%)"
-        default_phone = "+380 (67) 477-17-18"
-        default_email = "lesha.kramarenko@gmail.com"
+        target_phone = "+380 (50) 443-66-86"
+        target_email = "lesha.kramarenko@gmail.com"
 
-    customer = st.text_input("Замовник", "ОСББ Вишгородська 45")
-    address = st.text_input("Адреса об'єкта", "м. Київ, вул. Вишгородська 45")
+    # 3. ПРИМУСОВЕ ОНОВЛЕННЯ (це виправить проблему)
+    if "prev_vendor" not in st.session_state or st.session_state.prev_vendor != vendor_choice:
+        st.session_state.phone_val = target_phone
+        st.session_state.email_val = target_email
+        st.session_state.prev_vendor = vendor_choice
 
-with col2:
-    kp_num = st.text_input("Номер КП", "1223.25POW-B")
-    manager = st.text_input("Відповідальний", "Олексій Крамаренко")
-    date_str = st.date_input("Дата", datetime.date.today()).strftime("%d.%m.%Y")
+    # 4. ВІДМАЛЮВАННЯ ПОЛІВ
+    with col1:
+        customer = st.text_input("Замовник", "ОСББ Вишгородська 45")
+        address = st.text_input("Адреса об'єкта", "м. Київ, вул. Вишгородська 45")
     
-    # ВИПРАВЛЕНО ТУТ:
-    phone = st.text_input("Телефон", default_phone, key=f"phone_{vendor_choice}")
-    email = st.text_input("E-mail", default_email, key=f"email_{vendor_choice}")
+    with col2:
+        kp_num = st.text_input("Номер КП", "1223.25POW-B")
+        manager = st.text_input("Відповідальний", "Олексій Крамаренко")
+        date_str = st.date_input("Дата", datetime.date.today()).strftime("%d.%m.%Y")
+        
+        # Використовуємо value з session_state
+        phone = st.text_input("Телефон", value=st.session_state.phone_val, key="phone_input")
+        email = st.text_input("E-mail", value=st.session_state.email_val, key="email_input")
+        
+        # Оновлюємо session_state, якщо користувач ввів щось вручну
+        st.session_state.phone_val = phone
+        st.session_state.email_val = email
 
 st.subheader("📝 Технічне завдання та опис")
 txt_intro = st.text_area("Вступний текст ({{txt_intro}})", "Відповідно до наданих даних пропонуємо наступне:")
