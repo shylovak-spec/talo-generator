@@ -7,17 +7,26 @@ from io import BytesIO
 
 st.set_page_config(page_title="Talo КП Generator", page_icon="⚡", layout="wide")
 
-# --- РОЗУМНА ФУНКЦІЯ ЗАМІНИ (Зберігає жирний шрифт заголовків) ---
+# --- НОВА ПОСИЛЕНА ФУНКЦІЯ ЗАМІНИ (Склеює розірвані мітки) ---
 def replace_placeholders(doc, replacements):
+    # Обробка звичайних абзаців
     for p in doc.paragraphs:
         for key, value in replacements.items():
             placeholder = f"{{{{{key}}}}}"
             if placeholder in p.text:
-                for run in p.runs:
-                    if placeholder in run.text:
-                        run.text = run.text.replace(placeholder, str(value))
-                        run.bold = False  # Робимо текст самих даних звичайним
+                # Склеюємо всі частини тексту (runs) в один рядок
+                full_text = "".join([run.text for run in p.runs])
+                if placeholder in full_text:
+                    new_text = full_text.replace(placeholder, str(value))
+                    # Очищаємо всі runs і записуємо результат у перший
+                    for i, run in enumerate(p.runs):
+                        if i == 0:
+                            run.text = new_text
+                            run.bold = False  # Текст даних стає звичайним
+                        else:
+                            run.text = ""
 
+    # Обробка тексту в таблицях (наприклад, Виконавець часто в таблиці)
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
@@ -25,10 +34,15 @@ def replace_placeholders(doc, replacements):
                     for key, value in replacements.items():
                         placeholder = f"{{{{{key}}}}}"
                         if placeholder in p.text:
-                            for run in p.runs:
-                                if placeholder in run.text:
-                                    run.text = run.text.replace(placeholder, str(value))
-                                    run.bold = False
+                            full_text = "".join([run.text for run in p.runs])
+                            if placeholder in full_text:
+                                new_text = full_text.replace(placeholder, str(value))
+                                for i, run in enumerate(p.runs):
+                                    if i == 0:
+                                        run.text = new_text
+                                        run.bold = False
+                                    else:
+                                        run.text = ""
 
 # --- ІНТЕРФЕЙС STREAMLIT ---
 st.title("⚡ Генератор КП ТОВ «Тало»")
