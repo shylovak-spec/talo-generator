@@ -6,7 +6,7 @@ from io import BytesIO
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 import re
 
-st.set_page_config(page_title="Talo КП Generator", layout="wide")
+st.set_page_config(page_title="Talo КП Generator", layout="wide", page_icon="⚡")
 
 # ================== ФУНКЦІЯ ЗАМІНИ (Жирний заголовок : Звичайні дані) ==================
 def replace_placeholders(doc, replacements):
@@ -36,8 +36,11 @@ def replace_placeholders(doc, replacements):
                 if not is_header:
                     p.add_run(new_text).bold = False
 
+    # Обробка основного тексту
     for p in doc.paragraphs:
         process_paragraph(p)
+    
+    # Обробка таблиць (шапка КП)
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
@@ -45,25 +48,21 @@ def replace_placeholders(doc, replacements):
                     process_paragraph(p)
 
 # ================== ІНТЕРФЕЙС STREAMLIT ==================
-st.title("⚡ Генератор КП")
+st.title("⚡ Генератор Комерційних Пропозицій")
 
-# БЛОК 1: Реквізити
-st.subheader("📌 Основна інформація")
-col1, col2 = st.columns(2)
-with col1:
-    vendor_choice = st.selectbox("Виконавець:", ["ТОВ «ТАЛО»", "ФОП Крамаренко Олексій Сергійович"])
-    customer = st.text_input("Замовник", "ОСББ Вишгородська 45")
-    address = st.text_input("Адреса об'єкта", "м. Київ, вул. Вишгородська 45")
-with col2:
-    kp_num = st.text_input("Номер КП", "1223.25POW-B")
-    manager = st.text_input("Відповідальний", "Олексій Крамаренко")
-    date_str = st.date_input("Дата", datetime.date.today()).strftime("%d.%m.%Y")
-    phone = st.text_input("Телефон", "+380 (67) 477-17-18")
-    email = st.text_input("E-mail", "o.kramarenko@talo.com.ua")
+with st.expander("📌 Основна інформація", expanded=True):
+    col1, col2 = st.columns(2)
+    with col1:
+        vendor_choice = st.selectbox("Виконавець:", ["ТОВ «ТАЛО»", "ФОП Крамаренко Олексій Сергійович"])
+        customer = st.text_input("Замовник", "ОСББ Вишгородська 45")
+        address = st.text_input("Адреса об'єкта", "м. Київ, вул. Вишгородська 45")
+    with col2:
+        kp_num = st.text_input("Номер КП", "1223.25POW-B")
+        manager = st.text_input("Відповідальний", "Олексій Крамаренко")
+        date_str = st.date_input("Дата", datetime.date.today()).strftime("%d.%m.%Y")
+        phone = st.text_input("Телефон", "+380 (67) 477-17-18")
+        email = st.text_input("E-mail", "o.kramarenko@talo.com.ua")
 
-st.divider()
-
-# БЛОК 2: ТЕХНІЧНИЙ ОПИС
 st.subheader("📝 Технічне завдання та опис")
 txt_intro = st.text_area("Вступний текст ({{txt_intro}})", "Відповідно до наданих даних пропонуємо наступне:")
 c1, c2, c3 = st.columns(3)
@@ -73,8 +72,9 @@ with c3: l3 = st.text_input("Пункт 3 ({{line3}})", "Аварійне осв
 
 st.divider()
 
-# БЛОК 3: Специфікація
+# ================== СПЕЦИФІКАЦІЯ ТА ЛОГІКА ==================
 st.subheader("📦 Специфікація")
+
 if "selected_items" not in st.session_state:
     st.session_state.selected_items = {}
 
@@ -86,9 +86,9 @@ else:
 tabs = st.tabs(list(EQUIPMENT_BASE.keys()))
 for i, cat in enumerate(EQUIPMENT_BASE.keys()):
     with tabs[i]:
-        selected = st.multiselect(f"Додати з {cat}:", list(EQUIPMENT_BASE[cat].keys()), key=f"sel_{cat}")
+        selected = st.multiselect(f"Обрати товари з {cat}:", list(EQUIPMENT_BASE[cat].keys()), key=f"sel_{cat}")
         
-        # --- ВИПРАВЛЕННЯ: Очищення session_state при знятті галочки ---
+        # Видалення товарів, з яких зняли галочку
         current_keys = set(f"{cat}_{item}" for item in selected)
         for key in list(st.session_state.selected_items.keys()):
             if key.startswith(f"{cat}_") and key not in current_keys:
@@ -100,23 +100,27 @@ for i, cat in enumerate(EQUIPMENT_BASE.keys()):
             with cB: qty = st.number_input("К-сть", min_value=1, value=1, key=f"qty_{cat}_{item}")
             with cC: price = st.number_input("Ціна, грн", min_value=0, value=int(EQUIPMENT_BASE[cat][item]), key=f"pr_{cat}_{item}")
             subtotal = int(qty * price)
-            with cD: st.write(f"**{subtotal:,}** грн")
+            with cD: st.write(f"**{subtotal:,}** грн".replace(',', ' '))
             
-            # --- ВИПРАВЛЕННЯ: "Найменування" українською ---
             st.session_state.selected_items[f"{cat}_{item}"] = {
                 "Найменування": item, "Кількість": qty, "Ціна": price, "Сума": subtotal, "Категорія": cat
             }
 
+# ================== ПІДСУМКИ ТА ГЕНЕРАЦІЯ ==================
 all_selected_data = list(st.session_state.selected_items.values())
 
 if all_selected_data:
+    st.divider()
     raw_total = sum(x["Сума"] for x in all_selected_data)
     tax_val = int(round(raw_total * tax_rate))
     final_total = raw_total + tax_val
+    
+    st.info(f"Загальна вартість КП: **{final_total:,}** грн".replace(',', ' '))
 
-    if st.button("🚀 Згенерувати КП"):
+    if st.button("🚀 Згенерувати та завантажити КП", type="primary", use_container_width=True):
         doc = Document("template.docx")
         
+        # Заміна в тексті
         replace_placeholders(doc, {
             "vendor_name": v_display, "vendor_full_name": v_full,
             "customer": customer, "address": address, "kp_num": kp_num, 
@@ -124,18 +128,24 @@ if all_selected_data:
             "txt_intro": txt_intro, "line1": l1, "line2": l2, "line3": l3
         })
 
+        # Заповнення таблиці
         target_table = next((t for t in doc.tables if "Найменування" in t.rows[0].cells[0].text), None)
         if target_table:
-            sections = {"ОБЛАДНАННЯ": ["1. Інвертори Deye", "2. Акумулятори (АКБ)"], "МАТЕРІАЛИ": ["3. Комплектуючі та щити"], "РОБОТИ ТА ПОСЛУГИ": ["4. Послуги та Роботи"]}
+            sections = {
+                "ОБЛАДНАННЯ": ["1. Інвертори Deye", "2. Акумулятори (АКБ)"],
+                "МАТЕРІАЛИ": ["3. Комплектуючі та щити"],
+                "РОБОТИ ТА ПОСЛУГИ": ["4. Послуги та Роботи"]
+            }
+            
             for sec, cats in sections.items():
                 items = [x for x in all_selected_data if x["Категорія"] in cats]
                 if items:
+                    # Рядок категорії
                     r = target_table.add_row().cells
                     r[0].text = sec
-                    # --- ВИПРАВЛЕННЯ: Надійний bold для всіх runs ---
-                    for run in r[0].paragraphs[0].runs:
-                        run.bold = True
-                        
+                    for run in r[0].paragraphs[0].runs: run.bold = True
+                    
+                    # Товари
                     for it in items:
                         r = target_table.add_row().cells
                         r[0].text = f" - {it['Найменування']}"
@@ -146,25 +156,29 @@ if all_selected_data:
                         r[3].text = f"{it['Сума']:,}".replace(",", " ")
                         r[3].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
 
-            # Підсумки
-            # --- ВИПРАВЛЕННЯ: "РАЗОМ:" замість "без податку" ---
-            summary_rows = [
+            # Фінальні розрахунки
+            summary = [
                 ("РАЗОМ:", raw_total, False), 
                 (f"{tax_label}:", tax_val, False), 
                 ("ЗАГАЛЬНА ВАРТІСТЬ:", final_total, True)
             ]
-            for label, val, is_bold in summary_rows:
+            for label, val, is_bold in summary:
                 r = target_table.add_row().cells
                 r[0].text, r[3].text = label, f"{val:,}".replace(",", " ")
                 r[3].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
                 if is_bold:
-                    for c in r: 
-                        for run in c.paragraphs[0].runs:
-                            run.bold = True
+                    for c in r:
+                        for run in c.paragraphs[0].runs: run.bold = True
 
-        safe_name = re.sub(r"[^\w\s-]", "", customer)[:20]
-        file_name = f"KP_{kp_num}_{safe_name}.docx"
+        # Підготовка файлу
+        safe_name = re.sub(r"[^\w\s-]", "", customer)[:25]
         output = BytesIO()
         doc.save(output)
         output.seek(0)
-        st.download_button("📥 ЗАВАНТАЖИТИ КП", output, file_name)
+        
+        st.download_button(
+            label="✅ Файл готовий! Натисніть для завантаження",
+            data=output,
+            file_name=f"KP_{kp_num}_{safe_name}.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
