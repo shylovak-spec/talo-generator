@@ -57,7 +57,7 @@ with st.expander("📌 Основна інформація", expanded=True):
     else:
         v_display, v_full = "ФОП Крамаренко О.С.", "ФОП Крамаренко О.С."
         tax_rate, tax_label = 0.06, "Податкове навантаження (6%)"
-        default_phone, default_email, v_id = "+380 (50) 443-66-86", "lesha.kramarenko@gmail.com", "fop"
+        default_phone, default_email, v_id = "+380 (67) 477-17-18", "o.kramarenko@talo.com.ua", "fop"
 
     with col1:
         customer = st.text_input("Замовник", "ОСББ Вишгородська 45")
