@@ -157,24 +157,26 @@ if st.session_state.selected_items:
     
     if st.button("🚀 Згенерувати КП та Специфікації", type="primary", use_container_width=True):
         
-        # 1. Дані для заміни (спільні)
         full_date_ukr = get_ukr_date(date_val)
-        spec_id_p = f"№1 від {full_date_ukr} до Договору поставки №П{kp_num} від {short_year_date}"
-        spec_id_r = f"№1 від {full_date_ukr} до Договору підряду №Р{kp_num} від {short_year_date}"
+        short_date = date_val.strftime("%d.%m.%y")
         
-        # Реквізити
-        hw_v_info = VENDORS_DATA.get(supplier_hw_name, VENDORS_DATA["ТОВ «ТАЛО»"])
-        work_v_info = VENDORS_DATA.get(vendor_choice, VENDORS_DATA["ТОВ «ТАЛО»"])
+        # Реквізити постачальників
+        hw_v_info = VENDORS_DATA.get(supplier_hw_name)
+        work_v_info = VENDORS_DATA.get(vendor_choice)
 
-        # ГЕНЕРАЦІЯ ПОСТАВКИ
+        # ---------------------------------------------------------
+        # 1. СПЕЦИФІКАЦІЯ ПОСТАВКИ (ОБЛАДНАННЯ)
+        # ---------------------------------------------------------
         hw_items = [x for x in st.session_state.selected_items.values() if x["Категорія"] != "4. Послуги та Роботи"]
         if hw_items:
             doc_p = Document("template_postavka.docx")
             p_total = sum(i["Сума"] for i in hw_items)
-            p_final = p_total + int(p_total * tax_rate)
+            p_tax = int(p_total * tax_rate)
+            p_final = p_total + p_tax
             
+            # Заміна текстових тегів
             replace_placeholders(doc_p, {
-                "spec_id_postavka": spec_id_p,
+                "spec_id_postavka": f"№1 від {full_date_ukr} до Договору поставки №П{kp_num} від {short_date}",
                 "customer": customer, "address": address,
                 "vendor_name": supplier_hw_name,
                 "vendor_address": hw_v_info["address"],
@@ -186,32 +188,51 @@ if st.session_state.selected_items:
                 "total_sum_digits": f"{p_final:,}".replace(",", " "),
                 "total_sum_words": amount_to_text(p_final)
             })
-            # (Тут додати заповнення таблиці hw_items аналогічно вашому коду)
-            
+
+            # Заповнення таблиці товарами
+            table_p = doc_p.tables[0] # Беремо першу таблицю в документі
+            for it in hw_items:
+                row = table_p.add_row().cells
+                row[0].text = it['Найменування']
+                row[1].text = str(it['Кількість'])
+                row[2].text = f"{it['Ціна']:,}".replace(",", " ")
+                row[3].text = f"{it['Сума']:,}".replace(",", " ")
+
             buf_p = BytesIO()
             doc_p.save(buf_p)
-            st.download_button(f"📥 Специфікація Поставки ({supplier_hw_name})", buf_p.getvalue(), f"Spec_Postavka_{customer}.docx")
+            st.download_button(f"📥 Завантажити Поставку ({supplier_hw_name})", buf_p.getvalue(), f"Spec_Postavka_{customer}.docx")
 
-        # ГЕНЕРАЦІЯ РОБІТ
-        sw_items = [x for x in st.session_state.selected_items.values() if x["Категорія"] == "4. Послуги та Роботи"]
-        if sw_items:
+        # ---------------------------------------------------------
+        # 2. СПЕЦИФІКАЦІЯ РОБІТ (ПОСЛУГИ)
+        # ---------------------------------------------------------
+        work_items = [x for x in st.session_state.selected_items.values() if x["Категорія"] == "4. Послуги та Роботи"]
+        if work_items:
             doc_r = Document("template_roboti.docx")
-            r_total = sum(i["Сума"] for i in sw_items)
-            r_final = r_total + int(r_total * tax_rate)
+            r_total = sum(i["Сума"] for i in work_items)
+            r_tax = int(r_total * tax_rate)
+            r_final = r_total + r_tax
             
             replace_placeholders(doc_r, {
-                "spec_id_roboti": spec_id_r,
+                "spec_id_roboti": f"№1 від {full_date_ukr} до Договору підряду №Р{kp_num} від {short_date}",
                 "customer": customer, "address": address,
                 "vendor_name": vendor_choice,
                 "vendor_short_name": work_v_info["short_name"],
                 "total_sum_words": amount_to_text(r_final)
             })
-            # (Тут додати заповнення таблиці sw_items)
-            
+
+            # Заповнення таблиці роботами
+            table_r = doc_r.tables[0]
+            for it in work_items:
+                row = table_r.add_row().cells
+                row[0].text = it['Найменування']
+                row[1].text = str(it['Кількість'])
+                row[2].text = f"{it['Ціна']:,}".replace(",", " ")
+                row[3].text = f"{it['Сума']:,}".replace(",", " ")
+
             buf_r = BytesIO()
             doc_r.save(buf_r)
-            st.download_button(f"📥 Специфікація Робіт ({vendor_choice})", buf_r.getvalue(), f"Spec_Roboti_{customer}.docx")
+            st.download_button(f"📥 Завантажити Роботи ({vendor_choice})", buf_r.getvalue(), f"Spec_Roboti_{customer}.docx")
 
-        # ЗАПИС В ТАБЛИЦЮ
+        # ЗАПИС В ТАБЛИЦЮ (Реєстр)
         save_to_google_sheets([date_str, kp_num, customer, address, final_total, manager])
-        st.success("✅ Реєстр оновлено!")
+        st.success("✅ Специфікації згенеровані та дані внесені в Реєстр!")
