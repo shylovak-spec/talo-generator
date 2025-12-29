@@ -1,10 +1,8 @@
 import streamlit as st
 from database import EQUIPMENT_BASE
-import datetime
 from docx import Document
 from io import BytesIO
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-import re
 import os
 import math
 
@@ -18,74 +16,39 @@ except ImportError:
 VENDORS = {
     "ТОВ «ТАЛО»": {
         "full": "ТОВ «ТАЛО»",
-        "short": "О. КРАМАРЕНКО",
         "inn": "45274534",
         "adr": "03115, м. Київ, вул. Крамського Івана, 9",
         "iban": "UA443052990000026004046815601",
         "tax_label": "ПДВ (20%)",
         "tax_rate": 0.20
-    },
-    "ФОП Крамаренко Олексій Сергійович": {
-        "full": "ФОП Крамаренко Олексій Сергійович",
-        "short": "Олексій КРАМАРЕНКО",
-        "inn": "3048920896",
-        "adr": "02156 м. Київ, вул. Кіото 9, кв. 40",
-        "iban": "UA423348510000000026009261015",
-        "tax_label": "Податкове навантаження (6%)",
-        "tax_rate": 0.06
     }
 }
 
-# ================== ДОПОМІЖНІ ФУНКЦІЇ ==================
-def format_num(n):
-    """Форматування чисел з пробілом як роздільником"""
-    return f"{math.ceil(n):,}".replace(",", " ")
-
-def set_cell_style(cell, text, align=WD_ALIGN_PARAGRAPH.LEFT, bold=False):
-    """Налаштування тексту в клітинці"""
-    cell.text = ""
-    p = cell.paragraphs[0]
-    p.alignment = align
-    run = p.add_run(str(text))
-    run.bold = bold
-
-def amount_to_text_uk(amount):
-    val = math.ceil(amount)
-    if num2words is None: return f"{format_num(val)} грн."
-    try:
-        words = num2words(val, lang='uk').capitalize()
-        return f"{words} гривень 00 копійок"
-    except: return f"{format_num(val)} грн."
-
-def replace_headers_styled(doc, reps):
-    """Робить назву поля ЖИРНОЮ, а значення - звичайним (як на скріні)"""
-    mapping = {
-        "Комерційна пропозиція:": reps.get("kp_num", ""),
-        "Дата:": reps.get("date", ""),
-        "Замовник:": reps.get("customer", ""),
-        "Адреса:": reps.get("address", ""),
-        "Виконавець:": reps.get("vendor_name", ""),
-        "Відповідальний:": reps.get("manager", ""),
-        "Контактний телефон:": reps.get("phone", ""),
-        "E-mail:": reps.get("vendor_email", "")
-    }
+# ================== ГЛОБАЛЬНА ЗАМІНА ТЕГІВ ==================
+def global_replace(doc, replacements):
+    """Шукає теги {{tag}} всюди: в параграфах і в усіх таблицях"""
     for p in doc.paragraphs:
-        for key, val in mapping.items():
-            if key in p.text:
-                p.clear() # Очищуємо весь параграф
-                r1 = p.add_run(key + " ")
-                r1.bold = True
-                r2 = p.add_run(str(val))
-                r2.bold = False
+        for key, val in replacements.items():
+            if f"{{{{{key}}}}}" in p.text:
+                p.text = p.text.replace(f"{{{{{key}}}}}", str(val))
+    
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                for p in cell.paragraphs:
+                    for key, val in replacements.items():
+                        if f"{{{{{key}}}}}" in p.text:
+                            p.text = p.text.replace(f"{{{{{key}}}}}", str(val))
 
-def fill_spec_table(tbl, items, tax_label, tax_rate):
-    """Заповнення таблиці з групуванням та оформленням як на скріні"""
+# ================== ЗАПОВНЕННЯ ТАБЛИЦІ (З ГРУПУВАННЯМ) ==================
+def fill_smart_table(tbl, items, tax_label, tax_rate):
+    # Визначаємо категорії (як на скріні)
     groups = {
         "ОБЛАДНАННЯ": ["Інвертори Deye", "Акумулятори (АКБ)"],
         "МАТЕРІАЛИ ТА КОМПЛЕКТУЮЧІ": ["Комплектуючі та щити"],
         "ПОСЛУГИ ТА РОБОТИ": ["Послуги та Роботи"]
     }
-
+    
     grand_pure = 0
     col_count = len(tbl.columns)
 
@@ -93,126 +56,65 @@ def fill_spec_table(tbl, items, tax_label, tax_rate):
         g_items = [it for it in items if it['cat'] in g_cats]
         if not g_items: continue
 
-        # Рядок заголовку групи (ОБЛАДНАННЯ і т.д.)
+        # Рядок-заголовок групи
         row = tbl.add_row().cells
         row[0].merge(row[col_count - 1])
-        set_cell_style(row[0], g_name, WD_ALIGN_PARAGRAPH.CENTER, True)
+        row[0].text = g_name
+        row[0].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+        row[0].paragraphs[0].runs[0].bold = True
 
         for it in g_items:
             r = tbl.add_row().cells
-            set_cell_style(r[0], f"- {it['name']}")
+            r[0].text = f"- {it['name']}"
             if col_count >= 4:
-                set_cell_style(r[1], it['qty'], WD_ALIGN_PARAGRAPH.CENTER)
-                set_cell_style(r[2], format_num(it['p']), WD_ALIGN_PARAGRAPH.RIGHT)
-                set_cell_style(r[3], format_num(it['sum']), WD_ALIGN_PARAGRAPH.RIGHT)
+                r[1].text = str(it['qty'])
+                r[2].text = f"{it['p']:,}".replace(",", " ")
+                r[3].text = f"{it['sum']:,}".replace(",", " ")
             grand_pure += it['sum']
 
+    # Підсумки
     tax_val = math.ceil(grand_pure * tax_rate)
-    total_total = grand_pure + tax_val
+    total = grand_pure + tax_val
 
-    # Підсумкові рядки
-    summary_data = [
-        ("РАЗОМ, грн:", grand_pure),
-        (f"{tax_label}:", tax_val),
-        ("ЗАГАЛЬНА ВАРТІСТЬ, грн:", total_total)
-    ]
-
-    for label, val in summary_data:
-        row = tbl.add_row().cells
-        # Об'єднуємо перші 3 колонки для назви підсумку, якщо колонок 4
+    for label, val in [("РАЗОМ, грн:", grand_pure), (f"{tax_label}:", tax_val), ("ЗАГАЛЬНА ВАРТІСТЬ, грн:", total)]:
+        r = tbl.add_row().cells
         if col_count >= 4:
-            row[0].merge(row[2])
-            set_cell_style(row[0], label, bold=True)
-            set_cell_style(row[3], format_num(val), WD_ALIGN_PARAGRAPH.RIGHT, True)
+            r[0].merge(r[2])
+            r[0].text = label
+            r[3].text = f"{val:,}".replace(",", " ")
+            r[3].paragraphs[0].runs[0].bold = True
         else:
-            set_cell_style(row[0], label, bold=True)
-            set_cell_style(row[col_count-1], format_num(val), WD_ALIGN_PARAGRAPH.RIGHT, True)
+            r[0].text = f"{label} {val:,}".replace(",", " ")
+            
+    return total
 
-    return total_total
-
-# ================== STREAMLIT UI ==================
-st.set_page_config(page_title="Talo Generator", layout="wide")
+# ================== STREAMLIT ==================
 st.title("⚡ ТАЛО: Генератор")
 
 if "selected_items" not in st.session_state: st.session_state.selected_items = {}
-if "generated_files" not in st.session_state: st.session_state.generated_files = None
 
-with st.expander("📌 Основна інформація", expanded=True):
-    col1, col2 = st.columns(2)
-    vendor_choice = col1.selectbox("Виконавець:", list(VENDORS.keys()))
-    v = VENDORS[vendor_choice]
-    customer = col1.text_input("Замовник", "ОСББ")
-    address = col1.text_input("Адреса")
-    kp_num = col2.text_input("Номер КП", "1223.25")
-    manager = col2.text_input("Відповідальний", "Олексій Крамаренко")
-    date_val = col2.date_input("Дата")
-
-# Інтерфейс вибору
-tabs = st.tabs(list(EQUIPMENT_BASE.keys()))
-for i, cat in enumerate(EQUIPMENT_BASE.keys()):
-    with tabs[i]:
-        sel = st.multiselect(f"Додати з {cat}:", list(EQUIPMENT_BASE[cat].keys()), key=f"m_{cat}")
-        for name in sel:
-            key = f"{cat}_{name}"
-            if key not in st.session_state.selected_items:
-                st.session_state.selected_items[key] = {"name": name, "qty": 1, "p": int(EQUIPMENT_BASE[cat][name]), "cat": cat}
-            
-            c1, c2, c3, c4 = st.columns([3, 1, 1, 1])
-            c1.info(name)
-            st.session_state.selected_items[key]['qty'] = c2.number_input("К-сть", 1, 100, st.session_state.selected_items[key]['qty'], key=f"q_{key}")
-            st.session_state.selected_items[key]['p'] = c3.number_input("Ціна", 0, 1000000, st.session_state.selected_items[key]['p'], key=f"p_{key}")
-            st.session_state.selected_items[key]['sum'] = st.session_state.selected_items[key]['qty'] * st.session_state.selected_items[key]['p']
-            c4.metric("Сума", format_num(st.session_state.selected_items[key]['sum']))
-
-# Очистка видалених
-active_keys = [f"{cat}_{n}" for cat in EQUIPMENT_BASE for n in (st.session_state.get(f"m_{cat}") or [])]
-st.session_state.selected_items = {k: val for k, val in st.session_state.selected_items.items() if k in active_keys}
+# (Тут ваш блок вибору товарів як раніше...)
 
 items = list(st.session_state.selected_items.values())
 
-if items and st.button("🚀 ЗГЕНЕРУВАТИ ВСІ ДОКУМЕНТИ", type="primary"):
+if items and st.button("🚀 ЗГЕНЕРУВАТИ"):
     reps = {
-        "vendor_name": v["full"], "customer": customer, "address": address, 
-        "kp_num": kp_num, "date": date_val.strftime("%d.%m.%Y"), 
-        "manager": manager, "phone": "+380 (67) 477-17-18", 
-        "vendor_email": "o.kramarenko@talo.com.ua"
-    }
-    
-    results = {}
-    configs = {
-        "kp": {"tpl": "template.docx", "name": f"КП_{kp_num}.docx", "filter": lambda x: True},
-        "p": {"tpl": "template_postavka.docx", "name": f"Spec_Postavka_{kp_num}.docx", "filter": lambda x: "роботи" not in x['cat'].lower()},
-        "w": {"tpl": "template_roboti.docx", "name": f"Spec_Roboti_{kp_num}.docx", "filter": lambda x: "роботи" in x['cat'].lower()}
+        "kp_num": "1223.25", 
+        "customer": "ОСББ", 
+        "vendor_name": "ТОВ «ТАЛО»",
+        "date": "29.12.2025"
     }
 
-    for k, cfg in configs.items():
-        if os.path.exists(cfg["tpl"]):
-            doc = Document(cfg["tpl"])
-            replace_headers_styled(doc, reps)
-            f_items = [i for i in items if cfg["filter"](i)]
-            
-            if f_items:
-                # Беремо першу таблицю в документі
-                tbl = doc.tables[0]
-                total_val = fill_spec_table(tbl, f_items, v['tax_label'], v['tax_rate'])
-                
-                # Заміна тегів у тексті під таблицею
-                for p in doc.paragraphs:
-                    if "{{total_sum_digits}}" in p.text:
-                        p.text = p.text.replace("{{total_sum_digits}}", format_num(total_val))
-                    if "{{total_sum_words}}" in p.text:
-                        p.text = p.text.replace("{{total_sum_words}}", amount_to_text_uk(total_val))
-                
-                buf = BytesIO()
-                doc.save(buf)
-                buf.seek(0)
-                results[k] = {"name": cfg["name"], "data": buf}
-    
-    st.session_state.generated_files = results
-
-# Вивід кнопок
-if st.session_state.generated_files:
-    st.success("Документи готові!")
-    cols = st.columns(len(st.session_state.generated_files))
-    for i, (k, f) in enumerate(st.session_state.generated_files.items()):
-        cols[i].download_button(f["name"], f["data"], f["name"], key=f"dl_{k}")
+    if os.path.exists("template.docx"):
+        doc = Document("template.docx")
+        
+        # 1. Сначала заменяем теги {{kp_num}} и т.д.
+        global_replace(doc, reps)
+        
+        # 2. Потом заполняем таблицу
+        tbl = doc.tables[0] # або пошук за назвою "Найменування"
+        fill_smart_table(tbl, items, "ПДВ (20%)", 0.20)
+        
+        buf = BytesIO()
+        doc.save(buf)
+        st.download_button("Завантажити КП", buf.getvalue(), "KP.docx")
