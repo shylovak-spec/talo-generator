@@ -65,17 +65,8 @@ with st.expander("📌 Основна інформація", expanded=True):
     manager = col2.text_input("Відповідальний", "Олексій Крамаренко")
     date_str = col2.date_input("Дата", datetime.date.today()).strftime("%d.%m.%Y")
     
-    # ПРАВИЛЬНО РОЗМІЩЕНІ ПОЛЯ З ДИНАМІЧНИМИ КЛЮЧАМИ
-    phone = col2.text_input(
-        "Телефон", 
-        value=curr_phone, 
-        key=f"{FORM_VERSION}_phone_{v_id}"
-    )
-    email = col2.text_input(
-        "E-mail", 
-        value=curr_email, 
-        key=f"{FORM_VERSION}_email_{v_id}"
-    )
+    phone = col2.text_input("Телефон", value=curr_phone, key=f"{FORM_VERSION}_phone_{v_id}")
+    email = col2.text_input("E-mail", value=curr_email, key=f"{FORM_VERSION}_email_{v_id}")
 
 st.subheader("📝 Технічне завдання та опис")
 txt_intro = st.text_area("Вступний текст ({{txt_intro}})", "Відповідно до наданих даних пропонуємо наступне:")
@@ -103,7 +94,6 @@ for i, cat in enumerate(EQUIPMENT_BASE.keys()):
                 del st.session_state.selected_items[key]
 
         if selected:
-            # Заголовки з дуже маленькими відступами
             st.write("") 
             h1, h2, h3, h4 = st.columns([3, 0.8, 1.2, 1])
             h1.caption("🏷️ Товар")
@@ -112,25 +102,17 @@ for i, cat in enumerate(EQUIPMENT_BASE.keys()):
             h4.caption("📈 Сума")
 
             for item in selected:
-                # Використовуємо контейнер, щоб тримати елементи разом
                 with st.container():
-                    # Зменшуємо пропорції колонок: [назва, кількість, ціна, сума]
                     cA, cB, cC, cD = st.columns([3, 0.8, 1.2, 1])
-                    
                     with cA:
-                        # Використовуємо невеликий текст для назви, щоб не розпирало рядок
                         st.markdown(f"<div style='padding-top: 5px;'><b>{item}</b></div>", unsafe_allow_html=True)
-                    
                     with cB:
                         qty = st.number_input("К-сть", min_value=1, value=1, key=f"qty_{cat}_{item}", label_visibility="collapsed")
-                    
                     with cC:
                         price = st.number_input("Ціна", min_value=0, value=int(EQUIPMENT_BASE[cat][item]), key=f"pr_{cat}_{item}", label_visibility="collapsed")
                     
                     subtotal = int(qty * price)
-                    
                     with cD:
-                        # Робимо суму жирною та вирівняною по центру вертикалі
                         st.markdown(f"<div style='padding-top: 5px;'><b>{subtotal:,}</b> грн</div>".replace(',', ' '), unsafe_allow_html=True)
                     
                     st.session_state.selected_items[f"{cat}_{item}"] = {
@@ -151,13 +133,13 @@ if all_selected_data:
     if st.button("🚀 Згенерувати та завантажити КП", type="primary", use_container_width=True):
         doc = Document("template.docx")
         
-        # Заміна текстових міток у шаблоні
         replace_placeholders(doc, {
             "vendor_name": v_display, "vendor_full_name": v_full,
             "customer": customer, "address": address, "kp_num": kp_num, 
             "manager": manager, "date": date_str, "phone": phone, "email": email,
             "txt_intro": txt_intro, "line1": l1, "line2": l2, "line3": l3
         })
+
         target_table = next((t for t in doc.tables if "Найменування" in t.rows[0].cells[0].text), None)
         if target_table:
             sections = {
@@ -203,14 +185,12 @@ if all_selected_data:
         doc.save(output)
         output.seek(0)
 
-      # 1. Формуємо назву файлу на основі адреси
+        # ФОРМУЄМО НАЗВУ ФАЙЛУ (ЦЕЙ БЛОК МАЄ БУТИ ВСЕРЕДИНІ IF BUTTON)
         safe_address = re.sub(r'[\\/*?:"<>|«»]', "", address).replace(" ", "_")
         generated_file_name = f"КП_№{kp_num}_{safe_address[:50]}_{date_str}.docx"
 
-        # 2. Повідомляємо про успіх один раз
         st.success(f"✅ Файл '{generated_file_name}' готовий!")
 
-        # 3. Кнопка завантаження одна
         st.download_button(
             label="💾 Зберегти Комерційну Пропозицію",
             data=output,
