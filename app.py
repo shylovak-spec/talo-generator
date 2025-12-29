@@ -102,62 +102,92 @@ if st.session_state.selected_items:
     if vendor_choice == "ФОП Крамаренко Олексій Сергійович":
         supplier_hw_name = st.selectbox("Хто постачає ОБЛАДНАННЯ?", ["ФОП Крамаренко Олексій Сергійович", "ФОП Шилова Ксенія Вікторівна"])
 
-    if st.button("🚀 ЗГЕНЕРУВАТИ ДОКУМЕНТИ", type="primary", use_container_width=True):
+    if st.button("🚀 ЗГЕНЕРУВАТИ ВСІ ДОКУМЕНТИ", type="primary", use_container_width=True):
         full_date_ukr = get_ukr_date(date_val)
         short_date = date_val.strftime("%d.%m.%y")
+        
+        # --- НОВИЙ БЕЗПЕЧНИЙ РОЗПОДІЛ ТОВАРІВ ---
+        work_items = []
+        hw_items = []
+        
+        for k, v in st.session_state.selected_items.items():
+            # Робимо перевірку назви категорії (маленькими літерами та без зайвих пробілів)
+            cat_name = v["Категорія"].lower().strip()
+            
+            # Якщо в назві категорії є слова "послуги" або "роботи" — це в Специфікацію робіт
+            if "послуги" in cat_name or "роботи" in cat_name:
+                work_items.append(v)
+            else:
+                # Все інше (Інвертори, АКБ, Комплектуючі) — в Специфікацію поставки
+                hw_items.append(v)
 
-        # РОЗДІЛЯЄМО ТОВАРИ
-        hw_items = [v for k, v in st.session_state.selected_items.items() if v["Категорія"] != "4. Послуги та Робот"]
-        work_items = [v for k, v in st.session_state.selected_items.items() if v["Категорія"] == "4. Послуги та Роботи"]
-
-        # 1. ПОСТАВКА
+        # ---------------------------------------------------------
+        # 1. ГЕНЕРУЄМО ПОСТАВКУ (ОБЛАДНАННЯ)
+        # ---------------------------------------------------------
         if hw_items:
             try:
                 doc_p = Document("template_postavka.docx")
                 info = VENDORS_DATA[supplier_hw_name]
-                total = sum(i["Сума"] for i in hw_items)
+                total_p = sum(i["Сума"] for i in hw_items)
                 
                 replace_placeholders(doc_p, {
                     "spec_id_postavka": f"№1 від {full_date_ukr} до Договору поставки №П{kp_num} від {short_date}",
                     "customer": customer, "address": address, "vendor_name": supplier_hw_name,
                     "vendor_address": info["address"], "vendor_inn": info["inn"], "vendor_iban": info["iban"],
                     "vendor_bank": info["bank"], "vendor_email": info["email"], "vendor_short_name": info["short_name"],
-                    "total_sum_digits": f"{total:,}".replace(",", " "), "total_sum_words": amount_to_text(total)
+                    "total_sum_digits": f"{total_p:,}".replace(",", " "), 
+                    "total_sum_words": amount_to_text(total_p)
                 })
                 
-                table = doc_p.tables[0]
+                table = doc_p.tables[0] # Беремо першу таблицю в шаблоні
                 for it in hw_items:
                     row = table.add_row().cells
-                    row[0].text = it['Найменування']
+                    row[0].text = str(it['Найменування'])
                     row[1].text = str(it['Кількість'])
                     row[2].text = f"{it['Ціна']:,}".replace(",", " ")
                     row[3].text = f"{it['Сума']:,}".replace(",", " ")
                 
-                buf_p = BytesIO(); doc_p.save(buf_p)
-                st.download_button(f"📥 Скачати Поставку", buf_p.getvalue(), f"Spec_Postavka_{customer}.docx")
-            except Exception as e: st.error(f"Помилка Поставки: {e}")
+                buf_p = BytesIO()
+                doc_p.save(buf_p)
+                st.download_button(f"📥 Скачати Поставку ({supplier_hw_name})", buf_p.getvalue(), f"Spec_Postavka_{customer}.docx")
+            except Exception as e:
+                st.error(f"Помилка шаблону Поставки: {e}")
 
-        # 2. РОБОТИ
+        # ---------------------------------------------------------
+        # 2. ГЕНЕРУЄМО РОБОТИ (ПОСЛУГИ)
+        # ---------------------------------------------------------
         if work_items:
             try:
                 doc_r = Document("template_roboti.docx")
                 info = VENDORS_DATA[vendor_choice]
-                total = sum(i["Сума"] for i in work_items)
+                total_r = sum(i["Сума"] for i in work_items)
                 
+                # Очищення адресного тегу від можливих зайвих пробілів у шаблоні
                 replace_placeholders(doc_r, {
                     "spec_id_roboti": f"№1 від {full_date_ukr} до Договору підряду №Р{kp_num} від {short_date}",
                     "customer": customer, "address": address, "vendor_name": vendor_choice,
-                    "vendor_short_name": info["short_name"], "total_sum_words": amount_to_text(total)
+                    "vendor_short_name": info["short_name"],
+                    "total_sum_words": amount_to_text(total_r)
                 })
                 
-                table = doc_r.tables[0]
+                # Додаткова перевірка на тег адреси з пробілами (як на вашому скриншоті)
+                for p in doc_r.paragraphs:
+                    if "{{  address }}" in p.text:
+                        p.text = p.text.replace("{{  address }}", address)
+
+                table = doc_r.tables[0] # Беремо першу таблицю в шаблоні
                 for it in work_items:
                     row = table.add_row().cells
-                    row[0].text = it['Найменування']
+                    row[0].text = str(it['Найменування'])
                     row[1].text = str(it['Кількість'])
                     row[2].text = f"{it['Ціна']:,}".replace(",", " ")
                     row[3].text = f"{it['Сума']:,}".replace(",", " ")
                 
-                buf_r = BytesIO(); doc_r.save(buf_r)
-                st.download_button(f"📥 Скачати Роботи", buf_r.getvalue(), f"Spec_Roboti_{customer}.docx")
-            except Exception as e: st.error(f"Помилка Робіт: {e}")
+                buf_r = BytesIO()
+                doc_r.save(buf_r)
+                st.download_button(f"📥 Скачати Роботи ({vendor_choice})", buf_r.getvalue(), f"Spec_Roboti_{customer}.docx")
+            except Exception as e:
+                st.error(f"Помилка шаблону Робіт: {e}")
+        
+        if not hw_items and not work_items:
+            st.warning("⚠️ Ви не обрали жодного товару в жодній вкладці!")
