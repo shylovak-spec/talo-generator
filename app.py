@@ -4,38 +4,49 @@ import re
 import os
 from docx import Document
 from io import BytesIO
-from num2words import num2words
+
+# Спробуємо імпортувати num2words, якщо ні - зробимо «заглушку»
+try:
+    from num2words import num2words
+except ModuleNotFoundError:
+    st.error("Помилка: Бібліотека 'num2words' не встановлена. Додайте її в requirements.txt")
+
 from database import EQUIPMENT_BASE  
 
 # Налаштування сторінки
 st.set_page_config(page_title="Talo КП Generator", layout="wide", page_icon="⚡")
 
-# ================== ФУНКЦІЇ СИНХРОНІЗАЦІЇ ТА ОБРОБКИ ==================
+# ================== ДОПОМІЖНІ ФУНКЦІЇ ==================
 
 def amount_to_text(amount):
+    """Перетворення суми в текст з обробкою помилок мови"""
     units = int(amount)
     cents = int(round((amount - units) * 100))
     try:
         words = num2words(units, lang='uk').capitalize()
-    except:
-        words = str(units)
+    except Exception:
+        words = str(units) # Запасний варіант, якщо укр. мова не підтримується
     return f"{words} гривень {cents:02d} копійок"
 
 def replace_placeholders(doc, replacements):
-    """Заміна тексту зі збереженням жирного шрифту та стилів"""
-    for paragraph in doc.paragraphs:
-        for key, value in replacements.items():
-            placeholder = f"{{{{{key}}}}}"
-            if placeholder in paragraph.text:
-                for run in paragraph.runs:
-                    if placeholder in run.text:
-                        run.text = run.text.replace(placeholder, str(value))
+    """Заміна тексту без втрати жирного шрифту (через runs)"""
+    def process_element(element):
+        for paragraph in element.paragraphs:
+            for key, value in replacements.items():
+                placeholder = f"{{{{{key}}}}}"
+                if placeholder in paragraph.text:
+                    # Шукаємо тег усередині runs
+                    for run in paragraph.runs:
+                        if placeholder in run.text:
+                            run.text = run.text.replace(placeholder, str(value))
+    
+    process_element(doc)
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
-                replace_placeholders(cell, replacements)
+                process_element(cell)
 
-# ================== ДАНІ ВИКОНАВЦІВ ==================
+# ================== БАЗА РЕКВІЗИТІВ ==================
 VENDORS_DATA = {
     "ТОВ «ТАЛО»": {"short_name": "Олексій КРАМАРЕНКО", "email": "talo.energy@gmail.com", "inn": "45274534", "address": "03115, м. Київ, вул. Крамського Івана, 9", "iban": "UA443052990000026004046815601", "bank": "в АТ КБ «ПРИВАТБАНК»"},
     "ФОП Крамаренко Олексій Сергійович": {"short_name": "Олексій КРАМАРЕНКО", "email": "oleksii.kramarenko.fop@gmail.com", "inn": "3048920896", "address": "02156 м. Київ, вул. Кіото 9, кв. 40", "iban": "UA423348510000000026009261015", "bank": "в АТ «ПУМБ» м. Київ"},
@@ -43,7 +54,7 @@ VENDORS_DATA = {
 }
 
 # ================== ІНТЕРФЕЙС ==================
-st.title("⚡ Генератор КП та Специфікацій")
+st.title("⚡ Генератор документів Talo")
 
 if "selected_items" not in st.session_state:
     st.session_state.selected_items = {}
@@ -60,97 +71,90 @@ tabs = st.tabs(list(EQUIPMENT_BASE.keys()))
 
 for i, cat in enumerate(EQUIPMENT_BASE.keys()):
     with tabs[i]:
-        # Створюємо список обраних товарів
-        selected = st.multiselect(f"Додати з: {cat}", list(EQUIPMENT_BASE[cat].keys()), key=f"ms_{cat}")
+        selected = st.multiselect(f"Товари в категорії {cat}:", list(EQUIPMENT_BASE[cat].keys()), key=f"ms_{cat}")
         
-        # --- КЛЮЧОВЕ ВИПРАВЛЕННЯ: СИНХРОНІЗАЦІЯ ---
+        # СИНХРОНІЗАЦІЯ: Очищення видалених
         current_cat_keys = set(f"{cat}_{item}" for item in selected)
-        
-        # 1. Видаляємо те, що зняли в цій категорії
         for k in list(st.session_state.selected_items.keys()):
             if k.startswith(f"{cat}_") and k not in current_cat_keys:
                 del st.session_state.selected_items[k]
         
-        # 2. Додаємо/оновлюємо те, що обрано
+        # Додавання обраних
         for item in selected:
             key = f"{cat}_{item}"
-            col_q, col_p = st.columns([1, 1])
-            qty = col_q.number_input(f"К-сть: {item}", 1, 100, 1, key=f"q_{key}")
-            price = col_p.number_input(f"Ціна: {item}", 0, 1000000, int(EQUIPMENT_BASE[cat][item]), key=f"p_{key}")
-            
+            c_q, c_p = st.columns(2)
+            qty = c_q.number_input(f"К-сть {item}", 1, 100, 1, key=f"q_{key}")
+            price = c_p.number_input(f"Ціна {item}", 0, 1000000, int(EQUIPMENT_BASE[cat][item]), key=f"p_{key}")
             st.session_state.selected_items[key] = {
-                "Найменування": item, "Кількість": qty, "Ціна": price, "Сума": qty * price, "Категорія": cat
+                "Наименування": item, "Кількість": qty, "Ціна": price, "Сума": qty * price, "Категорія": cat
             }
 
-# --- DEBUG ПАНЕЛЬ (видалити після перевірки) ---
-with st.expander("🔍 Діагностика (перевірка вибраних товарів)"):
+# Перевірочна панель (для вас)
+with st.expander("🔍 Перевірка обраних товарів"):
     st.write(st.session_state.selected_items)
 
-# ================== БЛОК ГЕНЕРАЦІЇ ==================
-# Перевіряємо, чи є хоч один запис у вибраному
+# ================== ГЕНЕРАЦІЯ ==================
 if len(st.session_state.selected_items) > 0:
     st.divider()
     
-    # Вибір постачальника заліза (тільки якщо КП від Крамаренко)
-    supplier_hw_name = vendor_choice
-    if vendor_choice == "ФОП Крамаренко Олексій Сергійович":
-        supplier_hw_name = st.selectbox("Хто постачає ОБЛАДНАННЯ?", ["ФОП Крамаренко Олексій Сергійович", "ФОП Шилова Ксенія Вікторівна"])
-
     if st.button("🚀 ЗГЕНЕРУВАТИ ВСІ ДОКУМЕНТИ", type="primary", use_container_width=True):
-        
-        # Розподіл (безпечний)
-        hw_items = [v for v in st.session_state.selected_items.values() if "послуги" not in v["Категорія"].lower() and "роботи" not in v["Категорія"].lower()]
-        work_items = [v for v in st.session_state.selected_items.values() if "послуги" in v["Категорія"].lower() or "роботи" in v["Категорія"].lower()]
+        # Перевірка шаблонів [cite: 1, 10, 18]
+        templates = ["template_postavka.docx", "template_roboti.docx"]
+        missing = [t for t in templates if not os.path.exists(t)]
+        if missing:
+            st.error(f"Відсутні шаблони: {', '.join(missing)}")
+            st.stop()
 
-        # Дати
-        full_date = f"{date_val.day} { {1:'січня',2:'лютого',3:'березня',4:'квітня',5:'травня',6:'червня',7:'липня',8:'серпня',9:'вересня',10:'жовтня',11:'листопада',12:'грудня'}[date_val.month]} {date_val.year} року"
-        short_date = date_val.strftime("%d.%m.%y")
         safe_cust = re.sub(r'[\\/*?:"<>|]', "", customer)
+        full_date = f"{date_val.day} { {1:'січня',2:'лютого',3:'березня',4:'квітня',5:'травня',6:'червня',7:'липня',8:'серпня',9:'вересня',10:'жовтня',11:'листопада',12:'грудня'}[date_val.month]} {date_val.year} року"
+        
+        # Розподіл товарів
+        work_items = [v for v in st.session_state.selected_items.values() if "послуги" in v["Категорія"].lower() or "роботи" in v["Категорія"].lower()]
+        hw_items = [v for v in st.session_state.selected_items.values() if v not in work_items]
 
-        # 1. ПОСТАВКА
+        # 1. ГЕНЕРУЄМО ПОСТАВКУ [cite: 10, 12, 13, 17]
         if hw_items:
-            try:
-                doc = Document("template_postavka.docx")
-                total = sum(i["Сума"] for i in hw_items)
-                info = VENDORS_DATA[supplier_hw_name]
-                
-                replace_placeholders(doc, {
-                    "spec_id_postavka": f"№1 від {full_date} до Договору №П{kp_num} від {short_date}",
-                    "customer": customer, "address": address, "vendor_name": supplier_hw_name,
-                    "vendor_address": info["address"], "vendor_inn": info["inn"], "vendor_iban": info["iban"],
-                    "total_sum_digits": f"{total:,}".replace(",", " "), "total_sum_words": amount_to_text(total),
-                    "vendor_short_name": info["short_name"], "vendor_email": info["email"]
-                })
-                
-                table = doc.tables[0]
-                for it in hw_items:
-                    row = table.add_row().cells
-                    row[0].text, row[1].text = it['Найменування'], str(it['Кількість'])
-                    row[2].text, row[3].text = f"{it['Ціна']:,}".replace(",", " "), f"{it['Сума']:,}".replace(",", " ")
-                
-                buf = BytesIO(); doc.save(buf)
-                st.download_button(f"📥 Скачати Поставку", buf.getvalue(), f"Postavka_{safe_cust}.docx")
-            except Exception as e: st.error(f"Помилка Поставки: {e}")
+            doc_p = Document("template_postavka.docx")
+            total_p = sum(i["Сума"] for i in hw_items)
+            info = VENDORS_DATA[vendor_choice]
+            
+            replace_placeholders(doc_p, {
+                "spec_id_postavka": f"№1 від {full_date}", "customer": customer, "address": address,
+                "vendor_name": vendor_choice, "vendor_address": info["address"], "vendor_inn": info["inn"],
+                "total_sum_digits": f"{total_p:,}".replace(",", " "), "total_sum_words": amount_to_text(total_p),
+                "vendor_short_name": info["short_name"], "vendor_iban": info["iban"]
+            })
+            
+            table = doc_p.tables[0] [cite: 12]
+            for it in hw_items:
+                row = table.add_row().cells
+                row[0].text, row[1].text = it['Наименування'], str(it['Кількість'])
+                row[2].text, row[3].text = f"{it['Ціна']:,}".replace(",", " "), f"{it['Сума']:,}".replace(",", " ")
+            
+            buf_p = BytesIO(); doc_p.save(buf_p)
+            st.download_button("📥 Скачати Поставку", buf_p.getvalue(), f"Spec_Postavka_{safe_cust}.docx")
 
-        # 2. РОБОТИ
+        # 2. ГЕНЕРУЄМО РОБОТИ [cite: 1, 2, 4, 5, 9]
         if work_items:
-            try:
-                doc = Document("template_roboti.docx")
-                total = sum(i["Сума"] for i in work_items)
-                info = VENDORS_DATA[vendor_choice]
-                
-                replace_placeholders(doc, {
-                    "spec_id_roboti": f"№1 від {full_date} до Договору №Р{kp_num} від {short_date}",
-                    "customer": customer, "address": address, "vendor_name": vendor_choice,
-                    "total_sum_words": amount_to_text(total), "vendor_short_name": info["short_name"]
-                })
-                
-                table = doc.tables[0]
-                for it in work_items:
-                    row = table.add_row().cells
-                    row[0].text, row[1].text = it['Найменування'], str(it['Кількість'])
-                    row[2].text, row[3].text = f"{it['Ціна']:,}".replace(",", " "), f"{it['Сума']:,}".replace(",", " ")
-                
-                buf = BytesIO(); doc.save(buf)
-                st.download_button(f"📥 Скачати Роботи", buf.getvalue(), f"Roboti_{safe_cust}.docx")
-            except Exception as e: st.error(f"Помилка Робіт: {e}")
+            doc_r = Document("template_roboti.docx")
+            total_r = sum(i["Сума"] for i in work_items)
+            info = VENDORS_DATA[vendor_choice]
+            
+            # Спеціальна обробка тегу з подвійними пробілами {{  address }} зі скриншота 
+            replace_placeholders(doc_r, {
+                "spec_id_roboti": f"№1 від {full_date}", "customer": customer, 
+                "total_sum_words": amount_to_text(total_r), "vendor_name": vendor_choice,
+                "vendor_short_name": info["short_name"]
+            })
+            for p in doc_r.paragraphs:
+                if "{{  address }}" in p.text:
+                    p.text = p.text.replace("{{  address }}", address)
+
+            table = doc_r.tables[0] [cite: 4]
+            for it in work_items:
+                row = table.add_row().cells
+                row[0].text, row[1].text = it['Наименування'], str(it['Кількість'])
+                row[2].text, row[3].text = f"{it['Ціна']:,}".replace(",", " "), f"{it['Сума']:,}".replace(",", " ")
+            
+            buf_r = BytesIO(); doc_r.save(buf_r)
+            st.download_button("📥 Скачати Роботи", buf_r.getvalue(), f"Spec_Roboti_{safe_cust}.docx")
