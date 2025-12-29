@@ -4,6 +4,7 @@ import datetime
 from docx import Document
 from io import BytesIO
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+import re
 import os
 import math
 
@@ -16,14 +17,20 @@ except ImportError:
 # ================== НАЛАШТУВАННЯ ТА ДАНІ ==================
 VENDORS = {
     "ТОВ «ТАЛО»": {
-        "full": "ТОВАРИСТВО З ОБМЕЖЕНОЮ ВІДПОВІДАЛЬНІСТЮ «ТАЛО»",
+        "full": "ТОВ «ТАЛО»",
+        "short": "О. КРАМАРЕНКО",
         "inn": "45274534",
+        "adr": "03115, м. Київ, вул. Крамського Івана, 9",
+        "iban": "UA443052990000026004046815601",
         "tax_label": "ПДВ (20%)",
         "tax_rate": 0.20
     },
     "ФОП Крамаренко Олексій Сергійович": {
         "full": "ФОП Крамаренко Олексій Сергійович",
+        "short": "Олексій КРАМАРЕНКО",
         "inn": "3048920896",
+        "adr": "02156 м. Київ, вул. Кіото 9, кв. 40",
+        "iban": "UA423348510000000026009261015",
         "tax_label": "Податкове навантаження (6%)",
         "tax_rate": 0.06
     }
@@ -31,9 +38,11 @@ VENDORS = {
 
 # ================== ДОПОМІЖНІ ФУНКЦІЇ ==================
 def format_num(n):
+    """Форматування чисел з пробілом як роздільником"""
     return f"{math.ceil(n):,}".replace(",", " ")
 
 def set_cell_style(cell, text, align=WD_ALIGN_PARAGRAPH.LEFT, bold=False):
+    """Налаштування тексту в клітинці"""
     cell.text = ""
     p = cell.paragraphs[0]
     p.alignment = align
@@ -49,6 +58,7 @@ def amount_to_text_uk(amount):
     except: return f"{format_num(val)} грн."
 
 def replace_headers_styled(doc, reps):
+    """Робить назву поля ЖИРНОЮ, а значення - звичайним (як на скріні)"""
     mapping = {
         "Комерційна пропозиція:": reps.get("kp_num", ""),
         "Дата:": reps.get("date", ""),
@@ -62,19 +72,20 @@ def replace_headers_styled(doc, reps):
     for p in doc.paragraphs:
         for key, val in mapping.items():
             if key in p.text:
-                # Надійна заміна: очищуємо і пишемо заново Жирний + Звичайний
-                p.clear()
+                p.clear() # Очищуємо весь параграф
                 r1 = p.add_run(key + " ")
                 r1.bold = True
                 r2 = p.add_run(str(val))
                 r2.bold = False
 
 def fill_spec_table(tbl, items, tax_label, tax_rate):
+    """Заповнення таблиці з групуванням та оформленням як на скріні"""
     groups = {
         "ОБЛАДНАННЯ": ["Інвертори Deye", "Акумулятори (АКБ)"],
         "МАТЕРІАЛИ ТА КОМПЛЕКТУЮЧІ": ["Комплектуючі та щити"],
         "ПОСЛУГИ ТА РОБОТИ": ["Послуги та Роботи"]
     }
+
     grand_pure = 0
     col_count = len(tbl.columns)
 
@@ -82,6 +93,7 @@ def fill_spec_table(tbl, items, tax_label, tax_rate):
         g_items = [it for it in items if it['cat'] in g_cats]
         if not g_items: continue
 
+        # Рядок заголовку групи (ОБЛАДНАННЯ і т.д.)
         row = tbl.add_row().cells
         row[0].merge(row[col_count - 1])
         set_cell_style(row[0], g_name, WD_ALIGN_PARAGRAPH.CENTER, True)
@@ -98,27 +110,32 @@ def fill_spec_table(tbl, items, tax_label, tax_rate):
     tax_val = math.ceil(grand_pure * tax_rate)
     total_total = grand_pure + tax_val
 
-    for label, val in [("РАЗОМ, грн:", grand_pure), (f"{tax_label}:", tax_val), ("ЗАГАЛЬНА ВАРТІСТЬ, грн:", total_total)]:
+    # Підсумкові рядки
+    summary_data = [
+        ("РАЗОМ, грн:", grand_pure),
+        (f"{tax_label}:", tax_val),
+        ("ЗАГАЛЬНА ВАРТІСТЬ, грн:", total_total)
+    ]
+
+    for label, val in summary_data:
         row = tbl.add_row().cells
+        # Об'єднуємо перші 3 колонки для назви підсумку, якщо колонок 4
         if col_count >= 4:
-            row[0].merge(row[col_count - 2])
+            row[0].merge(row[2])
             set_cell_style(row[0], label, bold=True)
-            set_cell_style(row[col_count - 1], format_num(val), WD_ALIGN_PARAGRAPH.RIGHT, True)
-        elif col_count == 3:
-            row[0].merge(row[1])
-            set_cell_style(row[0], label, bold=True)
-            set_cell_style(row[2], format_num(val), WD_ALIGN_PARAGRAPH.RIGHT, True)
+            set_cell_style(row[3], format_num(val), WD_ALIGN_PARAGRAPH.RIGHT, True)
         else:
-            set_cell_style(row[0], f"{label} {format_num(val)}", bold=True)
+            set_cell_style(row[0], label, bold=True)
+            set_cell_style(row[col_count-1], format_num(val), WD_ALIGN_PARAGRAPH.RIGHT, True)
+
     return total_total
 
 # ================== STREAMLIT UI ==================
 st.set_page_config(page_title="Talo Generator", layout="wide")
 st.title("⚡ ТАЛО: Генератор")
 
-# Стан для збереження результатів, щоб кнопки не зникали
-if "generated_files" not in st.session_state: st.session_state.generated_files = None
 if "selected_items" not in st.session_state: st.session_state.selected_items = {}
+if "generated_files" not in st.session_state: st.session_state.generated_files = None
 
 with st.expander("📌 Основна інформація", expanded=True):
     col1, col2 = st.columns(2)
@@ -130,6 +147,7 @@ with st.expander("📌 Основна інформація", expanded=True):
     manager = col2.text_input("Відповідальний", "Олексій Крамаренко")
     date_val = col2.date_input("Дата")
 
+# Інтерфейс вибору
 tabs = st.tabs(list(EQUIPMENT_BASE.keys()))
 for i, cat in enumerate(EQUIPMENT_BASE.keys()):
     with tabs[i]:
@@ -146,41 +164,55 @@ for i, cat in enumerate(EQUIPMENT_BASE.keys()):
             st.session_state.selected_items[key]['sum'] = st.session_state.selected_items[key]['qty'] * st.session_state.selected_items[key]['p']
             c4.metric("Сума", format_num(st.session_state.selected_items[key]['sum']))
 
+# Очистка видалених
 active_keys = [f"{cat}_{n}" for cat in EQUIPMENT_BASE for n in (st.session_state.get(f"m_{cat}") or [])]
-st.session_state.selected_items = {k: v for k, v in st.session_state.selected_items.items() if k in active_keys}
+st.session_state.selected_items = {k: val for k, val in st.session_state.selected_items.items() if k in active_keys}
 
 items = list(st.session_state.selected_items.values())
 
-if items:
-    if st.button("🚀 ЗГЕНЕРУВАТИ ВСІ ДОКУМЕНТИ", type="primary", use_container_width=True):
-        reps = {"vendor_name": v["full"], "customer": customer, "address": address, "kp_num": kp_num, "date": date_val.strftime("%d.%m.%Y"), "manager": manager, "phone": "+380 (67) 477-17-18", "vendor_email": "o.kramarenko@talo.com.ua"}
-        
-        results = {}
-        configs = {
-            "kp": {"tpl": "template.docx", "name": f"КП_{kp_num}.docx", "filter": lambda x: True},
-            "p": {"tpl": "template_postavka.docx", "name": f"Spec_Postavka_{kp_num}.docx", "filter": lambda x: "роботи" not in x['cat'].lower()},
-            "w": {"tpl": "template_roboti.docx", "name": f"Spec_Roboti_{kp_num}.docx", "filter": lambda x: "роботи" in x['cat'].lower()}
-        }
+if items and st.button("🚀 ЗГЕНЕРУВАТИ ВСІ ДОКУМЕНТИ", type="primary"):
+    reps = {
+        "vendor_name": v["full"], "customer": customer, "address": address, 
+        "kp_num": kp_num, "date": date_val.strftime("%d.%m.%Y"), 
+        "manager": manager, "phone": "+380 (67) 477-17-18", 
+        "vendor_email": "o.kramarenko@talo.com.ua"
+    }
+    
+    results = {}
+    configs = {
+        "kp": {"tpl": "template.docx", "name": f"КП_{kp_num}.docx", "filter": lambda x: True},
+        "p": {"tpl": "template_postavka.docx", "name": f"Spec_Postavka_{kp_num}.docx", "filter": lambda x: "роботи" not in x['cat'].lower()},
+        "w": {"tpl": "template_roboti.docx", "name": f"Spec_Roboti_{kp_num}.docx", "filter": lambda x: "роботи" in x['cat'].lower()}
+    }
 
-        for k, cfg in configs.items():
-            if os.path.exists(cfg["tpl"]):
-                doc = Document(cfg["tpl"])
-                replace_headers_styled(doc, reps)
-                f_items = [i for i in items if cfg["filter"](i)]
-                if f_items:
-                    tbl = doc.tables[0]
-                    total = fill_spec_table(tbl, f_items, v['tax_label'], v['tax_rate'])
-                    for p in doc.paragraphs:
-                        if "{{total_sum_digits}}" in p.text: p.text = p.text.replace("{{total_sum_digits}}", format_num(total))
-                        if "{{total_sum_words}}" in p.text: p.text = p.text.replace("{{total_sum_words}}", amount_to_text_uk(total))
-                    
-                    buf = BytesIO(); doc.save(buf); buf.seek(0)
-                    results[k] = {"name": cfg["name"], "data": buf}
-        
-        st.session_state.generated_files = results
+    for k, cfg in configs.items():
+        if os.path.exists(cfg["tpl"]):
+            doc = Document(cfg["tpl"])
+            replace_headers_styled(doc, reps)
+            f_items = [i for i in items if cfg["filter"](i)]
+            
+            if f_items:
+                # Беремо першу таблицю в документі
+                tbl = doc.tables[0]
+                total_val = fill_spec_table(tbl, f_items, v['tax_label'], v['tax_rate'])
+                
+                # Заміна тегів у тексті під таблицею
+                for p in doc.paragraphs:
+                    if "{{total_sum_digits}}" in p.text:
+                        p.text = p.text.replace("{{total_sum_digits}}", format_num(total_val))
+                    if "{{total_sum_words}}" in p.text:
+                        p.text = p.text.replace("{{total_sum_words}}", amount_to_text_uk(total_val))
+                
+                buf = BytesIO()
+                doc.save(buf)
+                buf.seek(0)
+                results[k] = {"name": cfg["name"], "data": buf}
+    
+    st.session_state.generated_files = results
 
+# Вивід кнопок
 if st.session_state.generated_files:
-    st.success("✅ Файли готові до завантаження:")
+    st.success("Документи готові!")
     cols = st.columns(len(st.session_state.generated_files))
-    for i, (k, res) in enumerate(st.session_state.generated_files.items()):
-        cols[i].download_button(label=f"📥 {res['name']}", data=res['data'], file_name=res['name'], key=f"btn_{k}")
+    for i, (k, f) in enumerate(st.session_state.generated_files.items()):
+        cols[i].download_button(f["name"], f["data"], f["name"], key=f"dl_{k}")
