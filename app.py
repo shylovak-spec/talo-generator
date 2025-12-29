@@ -6,8 +6,33 @@ from docx import Document
 from io import BytesIO
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 import re
+import gspread
+from google.oauth2.service_account import Credentials
 
 st.set_page_config(page_title="Talo КП Generator", layout="wide", page_icon="⚡")
+
+# ================== ФУНКЦІЯ GOOGLE SHEETS ==================
+def save_to_google_sheets(row_data):
+    try:
+        # Отримання облікових даних з Streamlit Secrets
+        credentials_info = st.secrets["gcp_service_account"]
+        scope = [
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive"
+        ]
+        creds = Credentials.from_service_account_info(credentials_info, scopes=scope)
+        gc = gspread.authorize(creds)
+        
+        # Відкриття таблиці за назвою (має точно збігатися в Google Drive)
+        sh = gc.open("Реєстр КП Talo")
+        worksheet = sh.get_worksheet(0)
+        
+        # Запис рядка даних
+        worksheet.append_row(row_data)
+        return True
+    except Exception as e:
+        st.error(f"Помилка запису в Google Sheets: {e}")
+        return False
 
 # ================== ФУНКЦІЯ ЗАМІНИ (Шапка та Текст) ==================
 def replace_placeholders(doc, replacements):
@@ -63,19 +88,11 @@ with st.expander("📌 Основна інформація", expanded=True):
     
     kp_num = col2.text_input("Номер КП", "1223.25POW-B")
     manager = col2.text_input("Відповідальний", "Олексій Крамаренко")
-    date_str = col2.date_input("Дата", datetime.date.today()).strftime("%d.%m.%Y")
+    date_obj = col2.date_input("Дата", datetime.date.today())
+    date_str = date_obj.strftime("%d.%m.%Y")
     
-    # ПРАВИЛЬНО РОЗМІЩЕНІ ПОЛЯ З ДИНАМІЧНИМИ КЛЮЧАМИ
-    phone = col2.text_input(
-        "Телефон", 
-        value=curr_phone, 
-        key=f"{FORM_VERSION}_phone_{v_id}"
-    )
-    email = col2.text_input(
-        "E-mail", 
-        value=curr_email, 
-        key=f"{FORM_VERSION}_email_{v_id}"
-    )
+    phone = col2.text_input("Телефон", value=curr_phone, key=f"{FORM_VERSION}_phone_{v_id}")
+    email = col2.text_input("E-mail", value=curr_email, key=f"{FORM_VERSION}_email_{v_id}")
 
 st.subheader("📝 Технічне завдання та опис")
 txt_intro = st.text_area("Вступний текст ({{txt_intro}})", "Відповідно до наданих даних пропонуємо наступне:")
@@ -103,7 +120,6 @@ for i, cat in enumerate(EQUIPMENT_BASE.keys()):
                 del st.session_state.selected_items[key]
 
         if selected:
-            # Заголовки з дуже маленькими відступами
             st.write("") 
             h1, h2, h3, h4 = st.columns([3, 0.8, 1.2, 1])
             h1.caption("🏷️ Товар")
@@ -112,25 +128,17 @@ for i, cat in enumerate(EQUIPMENT_BASE.keys()):
             h4.caption("📈 Сума")
 
             for item in selected:
-                # Використовуємо контейнер, щоб тримати елементи разом
                 with st.container():
-                    # Зменшуємо пропорції колонок: [назва, кількість, ціна, сума]
                     cA, cB, cC, cD = st.columns([3, 0.8, 1.2, 1])
-                    
                     with cA:
-                        # Використовуємо невеликий текст для назви, щоб не розпирало рядок
                         st.markdown(f"<div style='padding-top: 5px;'><b>{item}</b></div>", unsafe_allow_html=True)
-                    
                     with cB:
                         qty = st.number_input("К-сть", min_value=1, value=1, key=f"qty_{cat}_{item}", label_visibility="collapsed")
-                    
                     with cC:
                         price = st.number_input("Ціна", min_value=0, value=int(EQUIPMENT_BASE[cat][item]), key=f"pr_{cat}_{item}", label_visibility="collapsed")
                     
                     subtotal = int(qty * price)
-                    
                     with cD:
-                        # Робимо суму жирною та вирівняною по центру вертикалі
                         st.markdown(f"<div style='padding-top: 5px;'><b>{subtotal:,}</b> грн</div>".replace(',', ' '), unsafe_allow_html=True)
                     
                     st.session_state.selected_items[f"{cat}_{item}"] = {
@@ -199,17 +207,23 @@ if all_selected_data:
                     for cell in r:
                         for run in cell.paragraphs[0].runs: run.bold = True
 
+        # Підготовка до завантаження
         output = BytesIO()
         doc.save(output)
         output.seek(0)
 
-        # Додаємо очищення адреси для назви файлу
+        # Очищення адреси для назви файлу
         safe_address = re.sub(r'[\\/*?:"<>|«»]', "", address).replace(" ", "_")
+        filename = f"КП_{kp_num}_{safe_address}.docx"
+
+        # Збереження в Google Sheets (Дата, Номер, Замовник, Адреса, Сума, Відповідальний)
+        log_data = [date_str, kp_num, customer, address, final_total, manager]
+        if save_to_google_sheets(log_data):
+            st.toast("📊 Дані успішно додано в реєстр Google Sheets!")
 
         st.download_button(
             label="✅ Завантажити готовий файл",
             data=output,
-            file_name=f"КП_{kp_num}_{safe_address}.docx", # ОСЬ ТУТ ЗМІНА
+            file_name=filename,
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
-
