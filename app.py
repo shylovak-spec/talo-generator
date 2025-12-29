@@ -125,6 +125,7 @@ for i, cat in enumerate(EQUIPMENT_BASE.keys()):
             cD.markdown(f"<div style='padding-top: 5px;'><b>{subtotal:,}</b> грн</div>".replace(',', ' '), unsafe_allow_html=True)
             st.session_state.selected_items[key] = {"Найменування": item, "Кількість": qty, "Ціна": price, "Сума": subtotal, "Категорія": cat}
 
+# ================== ФІНАЛЬНА ГЕНЕРАЦІЯ ==================
 all_selected = list(st.session_state.selected_items.values())
 
 if all_selected:
@@ -134,12 +135,20 @@ if all_selected:
     final_total = raw_total + tax_val
     st.info(f"Загальна вартість: **{final_total:,}** грн".replace(',', ' '))
 
+    # Створюємо ключ у session_state для зберігання готових файлів
+    if "generated_files" not in st.session_state:
+        st.session_state.generated_files = None
+
     if st.button("🚀 ЗГЕНЕРУВАТИ ВСІ ДОКУМЕНТИ", type="primary", use_container_width=True):
+        # Логіка генерації...
         save_to_google_sheets([date_str, kp_num, customer, address, final_total, manager])
+        
+        files_to_save = {} # Словник для зберігання об'єктів BytesIO
         full_date_ukr = f"{date_val.day} { {1:'січня',2:'лютого',3:'березня',4:'квітня',5:'травня',6:'червня',7:'липня',8:'серпня',9:'вересня',10:'жовтня',11:'листопада',12:'грудня'}[date_val.month]} {date_val.year} року"
         safe_addr = re.sub(r'[\\/*?:"<>|]', "", address).replace(" ", "_")
+        safe_cust = re.sub(r'[\\/*?:"<>|]', "", customer).replace(" ", "_")
 
-        # --- 1. КП ---
+        # --- 1. ГЕНЕРАЦІЯ КП ---
         if os.path.exists("template.docx"):
             doc = Document("template.docx")
             replace_placeholders_stable(doc, {
@@ -153,21 +162,16 @@ if all_selected:
                 row[0].text, row[1].text = it['Найменування'], str(it['Кількість'])
                 row[2].text, row[3].text = f"{it['Ціна']:,}".replace(",", " "), f"{it['Сума']:,}".replace(",", " ")
             
-            # Рядок разом у КП
             row_total = table.add_row().cells
             row_total[0].text = "ЗАГАЛЬНА ВАРТІСТЬ З УРАХУВАННЯМ ПОДАТКІВ, грн"
             row_total[0].merge(row_total[2])
             row_total[3].text = f"{final_total:,}".replace(",", " ")
-            for run in row_total[0].paragraphs[0].runs + row_total[3].paragraphs[0].runs: run.bold = True
-
+            
             buf_kp = BytesIO(); doc.save(buf_kp); buf_kp.seek(0)
-            st.download_button(f"📥 КП_{kp_num}_{safe_addr}", buf_kp, f"КП_{kp_num}_{safe_addr}.docx")
-
-        # Розподіл на залізо та послуги
-        hw_items = [i for i in all_selected if "послуги" not in i["Категорія"].lower() and "роботи" not in i["Категорія"].lower()]
-        work_items = [i for i in all_selected if i not in hw_items]
+            files_to_save["kp"] = {"name": f"КП_{kp_num}_{safe_addr}.docx", "data": buf_kp}
 
         # --- 2. СПЕЦИФІКАЦІЯ ПОСТАВКИ ---
+        hw_items = [i for i in all_selected if "послуги" not in i["Категорія"].lower() and "роботи" not in i["Категорія"].lower()]
         if hw_items and os.path.exists("template_postavka.docx"):
             doc_p = Document("template_postavka.docx")
             total_p = sum(i["Сума"] for i in hw_items)
@@ -184,10 +188,12 @@ if all_selected:
             
             row_res = table_p.add_row().cells
             row_res[0].text, row_res[3].text = "РАЗОМ", f"{total_p:,}".replace(",", " ")
+            
             buf_p = BytesIO(); doc_p.save(buf_p); buf_p.seek(0)
-            st.download_button("📥 Специфікація Поставки", buf_p, f"Spec_Postavka_{kp_num}.docx")
+            files_to_save["postavka"] = {"name": f"Spec_Postavka_{kp_num}_{safe_cust}.docx", "data": buf_p}
 
         # --- 3. СПЕЦИФІКАЦІЯ РОБІТ ---
+        work_items = [i for i in all_selected if i not in hw_items]
         if work_items and os.path.exists("template_roboti.docx"):
             doc_r = Document("template_roboti.docx")
             total_r = sum(i["Сума"] for i in work_items)
@@ -196,7 +202,6 @@ if all_selected:
                 "vendor_address": vendor_info["adr"], "vendor_inn": vendor_info["inn"], "vendor_iban": vendor_info["iban"],
                 "vendor_email": email, "vendor_short_name": vendor_info["short"], "total_sum_words": amount_to_text_uk(total_r)
             })
-            # Спеціальна заміна адреси для шаблону робіт
             for p in doc_r.paragraphs:
                 if "{{ address }}" in p.text or "{{  address }}" in p.text:
                     p.text = p.text.replace("{{ address }}", address).replace("{{  address }}", address)
@@ -208,5 +213,25 @@ if all_selected:
             
             row_res = table_r.add_row().cells
             row_res[0].text, row_res[3].text = "РАЗОМ", f"{total_r:,}".replace(",", " ")
+            
             buf_r = BytesIO(); doc_r.save(buf_r); buf_r.seek(0)
-            st.download_button("📥 Специфікація Робіт", buf_r, f"Spec_Roboti_{kp_num}.docx")
+            files_to_save["roboti"] = {"name": f"Spec_Roboti_{kp_num}_{safe_cust}.docx", "data": buf_r}
+
+        # Зберігаємо все в стан сесії
+        st.session_state.generated_files = files_to_save
+        st.rerun() # Перезавантажуємо, щоб відобразити кнопки завантаження
+
+    # Відображення кнопок, якщо файли згенеровані
+    if st.session_state.generated_files:
+        st.write("### 📂 Готові документи:")
+        cols = st.columns(len(st.session_state.generated_files))
+        
+        for idx, (f_type, f_info) in enumerate(st.session_state.generated_files.items()):
+            with cols[idx]:
+                st.download_button(
+                    label=f"💾 {f_info['name']}",
+                    data=f_info['data'],
+                    file_name=f_info['name'],
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    key=f"download_{f_type}" # Унікальний ключ для кожної кнопки
+                )
