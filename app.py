@@ -95,23 +95,43 @@ if "selected_items" not in st.session_state:
 tabs = st.tabs(list(EQUIPMENT_BASE.keys()))
 for i, cat in enumerate(EQUIPMENT_BASE.keys()):
     with tabs[i]:
-        selected = st.multiselect(f"Обрати товари з {cat}:", list(EQUIPMENT_BASE[cat].keys()), key=f"sel_{cat}")
+        selected = st.multiselect(f"Додати з розділу {cat}:", list(EQUIPMENT_BASE[cat].keys()), key=f"sel_{cat}")
         
         current_keys = set(f"{cat}_{item}" for item in selected)
         for key in list(st.session_state.selected_items.keys()):
             if key.startswith(f"{cat}_") and key not in current_keys:
                 del st.session_state.selected_items[key]
 
-        for item in selected:
-            cA, cB, cC, cD = st.columns([3, 1, 2, 2])
-            qty = cB.number_input("К-сть", min_value=1, value=1, key=f"qty_{cat}_{item}")
-            price = cC.number_input("Ціна, грн", min_value=0, value=int(EQUIPMENT_BASE[cat][item]), key=f"pr_{cat}_{item}")
-            subtotal = int(qty * price)
-            cD.write(f"**{subtotal:,}** грн".replace(',', ' '))
-            
-            st.session_state.selected_items[f"{cat}_{item}"] = {
-                "Найменування": item, "Кількість": qty, "Ціна": price, "Сума": subtotal, "Категорія": cat
-            }
+        if selected:
+            st.write("---")
+            # Створюємо заголовки стовпчиків для економії місця
+            h1, h2, h3, h4 = st.columns([4, 1, 1.5, 1.5])
+            h1.caption("🏷️ Найменування")
+            h2.caption("🔢 К-сть")
+            h3.caption("💰 Ціна, грн")
+            h4.caption("📈 Сума")
+
+            for item in selected:
+                # Розміщуємо все в один рядок
+                cA, cB, cC, cD = st.columns([4, 1, 1.5, 1.5])
+                
+                with cA:
+                    st.info(f"**{item}**") # Виділяємо назву кольором для читабельності
+                
+                with cB:
+                    qty = st.number_input("К-сть", min_value=1, value=1, key=f"qty_{cat}_{item}", label_visibility="collapsed")
+                
+                with cC:
+                    price = st.number_input("Ціна", min_value=0, value=int(EQUIPMENT_BASE[cat][item]), key=f"pr_{cat}_{item}", label_visibility="collapsed")
+                
+                subtotal = int(qty * price)
+                
+                with cD:
+                    st.markdown(f"### {subtotal:,}".replace(',', ' '))
+                
+                st.session_state.selected_items[f"{cat}_{item}"] = {
+                    "Найменування": item, "Кількість": qty, "Ціна": price, "Сума": subtotal, "Категорія": cat
+                }
 
 # ================== ГЕНЕРАЦІЯ ТА РОЗРАХУНКИ ==================
 all_selected_data = list(st.session_state.selected_items.values())
