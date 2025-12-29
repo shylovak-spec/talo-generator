@@ -24,7 +24,7 @@ def save_to_google_sheets(row_data):
         gc = gspread.authorize(creds)
         
         # Відкриття таблиці за назвою (має точно збігатися в Google Drive)
-        sh = gc.open("Реєстр КП Talo")
+        sh = gc.open("TaloLog")
         worksheet = sh.get_worksheet(0)
         
         # Запис рядка даних
