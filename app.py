@@ -217,11 +217,19 @@ if all_selected_data:
 
         # 2. ЗАПИС У GOOGLE SHEETS (Тільки при натисканні кнопки)
         # Формат: Дата, Номер КП, Замовник, Адреса, Сума, Відповідальний
-        row_to_log = [date_str, kp_num, customer, address, final_total, manager]
+        row_to_log = [
+            date_str, 
+            kp_num, 
+            customer, 
+            address, 
+            final_total, 
+            manager
+        ]
+        
         success = save_to_google_sheets(row_to_log)
         
         if success:
-            st.success("✅ Дані успішно додано до Реєстру (Google Sheets)")
+            st.success("✅ Дані записано в реєстр")
         
         # 3. Підготовка до завантаження файлу
         safe_address = re.sub(r'[\\/*?:"<>|«»]', "", address).replace(" ", "_")
