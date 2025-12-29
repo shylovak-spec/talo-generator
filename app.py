@@ -85,52 +85,56 @@ def fill_spec_table(tbl, items, tax_label, tax_rate):
         "МАТЕРІАЛИ ТА КОМПЛЕКТУЮЧІ": ["Комплектуючі та щити"],
         "ПОСЛУГИ ТА РОБОТИ": ["Послуги та Роботи"]
     }
-    
+
     grand_pure = 0
     col_count = len(tbl.columns)
-    
+
     for g_name, g_cats in groups.items():
         g_items = [it for it in items if it['cat'] in g_cats]
-        if not g_items: continue
-        
+        if not g_items:
+            continue
+
         # Заголовок групи
         row = tbl.add_row().cells
+        if col_count >= 2:
+            row[0].merge(row[col_count - 1])
+        set_cell_style(row[0], g_name, WD_ALIGN_PARAGRAPH.CENTER, True)
 
-if col_count >= 4:
-    row[0].merge(row[col_count - 2])
-    set_cell_style(row[0], label, bold=True)
-    set_cell_style(row[col_count - 1], format_num(val), WD_ALIGN_PARAGRAPH.RIGHT, True)
-
-elif col_count == 3:
-    row[0].merge(row[1])
-    set_cell_style(row[0], label, bold=True)
-    set_cell_style(row[2], format_num(val), WD_ALIGN_PARAGRAPH.RIGHT, True)
-
-else:  # 1–2 колонки
-    set_cell_style(row[0], f"{label} {format_num(val)}", bold=True)
-        
         for it in g_items:
             r = tbl.add_row().cells
             set_cell_style(r[0], f"- {it['name']}")
+
             if col_count >= 4:
                 set_cell_style(r[1], it['qty'], WD_ALIGN_PARAGRAPH.CENTER)
                 set_cell_style(r[2], format_num(it['p']), WD_ALIGN_PARAGRAPH.RIGHT)
                 set_cell_style(r[3], format_num(it['sum']), WD_ALIGN_PARAGRAPH.RIGHT)
+
             grand_pure += it['sum']
 
     tax_val = math.ceil(grand_pure * tax_rate)
     total_total = grand_pure + tax_val
-    
+
     # Підсумкові рядки
-    for label, val in [("РАЗОМ, грн:", grand_pure), (f"{tax_label}:", tax_val), ("ЗАГАЛЬНА ВАРТІСТЬ, грн:", total_total)]:
+    for label, val in [
+        ("РАЗОМ, грн:", grand_pure),
+        (f"{tax_label}:", tax_val),
+        ("ЗАГАЛЬНА ВАРТІСТЬ, грн:", total_total)
+    ]:
         row = tbl.add_row().cells
+
         if col_count >= 4:
-            row[0].merge(row[2])
+            row[0].merge(row[col_count - 2])
             set_cell_style(row[0], label, bold=True)
-            set_cell_style(row[3], format_num(val), WD_ALIGN_PARAGRAPH.RIGHT, True)
-        else:
+            set_cell_style(row[col_count - 1], format_num(val), WD_ALIGN_PARAGRAPH.RIGHT, True)
+
+        elif col_count == 3:
+            row[0].merge(row[1])
+            set_cell_style(row[0], label, bold=True)
+            set_cell_style(row[2], format_num(val), WD_ALIGN_PARAGRAPH.RIGHT, True)
+
+        else:  # 1–2 колонки
             set_cell_style(row[0], f"{label} {format_num(val)}", bold=True)
-            
+
     return total_total
 
 # ================== STREAMLIT UI ==================
