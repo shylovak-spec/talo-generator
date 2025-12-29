@@ -107,7 +107,7 @@ if st.session_state.selected_items:
         short_date = date_val.strftime("%d.%m.%y")
 
         # РОЗДІЛЯЄМО ТОВАРИ
-        hw_items = [v for k, v in st.session_state.selected_items.items() if v["Категорія"] != "4. Послуги та Роботи"]
+        hw_items = [v for k, v in st.session_state.selected_items.items() if v["Категорія"] != "4. Послуги та Робот"]
         work_items = [v for k, v in st.session_state.selected_items.items() if v["Категорія"] == "4. Послуги та Роботи"]
 
         # 1. ПОСТАВКА
