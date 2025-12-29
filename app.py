@@ -6,38 +6,8 @@ from docx import Document
 from io import BytesIO
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 import re
-import gspread
-from google.oauth2.service_account import Credentials
 
 st.set_page_config(page_title="Talo КП Generator", layout="wide", page_icon="⚡")
-
-# ================== ФУНКЦІЯ GOOGLE SHEETS ==================
-def save_to_google_sheets(row_data):
-    """Підключення до Google Sheets та запис рядка даних"""
-    try:
-        if "gcp_service_account" not in st.secrets:
-            st.error("❌ Секрети 'gcp_service_account' не знайдено в Streamlit Cloud!")
-            return False
-        
-        # Авторизація через секрети
-        credentials_info = st.secrets["gcp_service_account"]
-        scope = [
-            "https://www.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/drive"
-        ]
-        creds = Credentials.from_service_account_info(credentials_info, scopes=scope)
-        gc = gspread.authorize(creds)
-        
-        # Відкриття таблиці за назвою (переконайтеся, що доступ надано для talo-bot@...)
-        sh = gc.open("Реєстр КП Talo")
-        worksheet = sh.get_worksheet(0) # Беремо перший аркуш
-        
-        # Запис даних
-        worksheet.append_row(row_data)
-        return True
-    except Exception as e:
-    st.exception(e)
-    return False
 
 # ================== ФУНКЦІЯ ЗАМІНИ (Шапка та Текст) ==================
 def replace_placeholders(doc, replacements):
@@ -56,12 +26,11 @@ def replace_placeholders(doc, replacements):
                 is_header = False
                 for bh in bold_headers:
                     if new_text.strip().startswith(bh + ":"):
-                        if ":" in new_text:
-                            left, right = new_text.split(":", 1)
-                            p.add_run(left + ":").bold = True
-                            p.add_run(right).bold = False
-                            is_header = True
-                            break
+                        left, right = new_text.split(":", 1)
+                        p.add_run(left + ":").bold = True
+                        p.add_run(right).bold = False
+                        is_header = True
+                        break
                 
                 if not is_header:
                     p.add_run(new_text).bold = False
@@ -94,11 +63,19 @@ with st.expander("📌 Основна інформація", expanded=True):
     
     kp_num = col2.text_input("Номер КП", "1223.25POW-B")
     manager = col2.text_input("Відповідальний", "Олексій Крамаренко")
-    date_val = col2.date_input("Дата", datetime.date.today())
-    date_str = date_val.strftime("%d.%m.%Y")
+    date_str = col2.date_input("Дата", datetime.date.today()).strftime("%d.%m.%Y")
     
-    phone = col2.text_input("Телефон", value=curr_phone, key=f"{FORM_VERSION}_phone_{v_id}")
-    email = col2.text_input("E-mail", value=curr_email, key=f"{FORM_VERSION}_email_{v_id}")
+    # ПРАВИЛЬНО РОЗМІЩЕНІ ПОЛЯ З ДИНАМІЧНИМИ КЛЮЧАМИ
+    phone = col2.text_input(
+        "Телефон", 
+        value=curr_phone, 
+        key=f"{FORM_VERSION}_phone_{v_id}"
+    )
+    email = col2.text_input(
+        "E-mail", 
+        value=curr_email, 
+        key=f"{FORM_VERSION}_email_{v_id}"
+    )
 
 st.subheader("📝 Технічне завдання та опис")
 txt_intro = st.text_area("Вступний текст ({{txt_intro}})", "Відповідно до наданих даних пропонуємо наступне:")
@@ -126,6 +103,7 @@ for i, cat in enumerate(EQUIPMENT_BASE.keys()):
                 del st.session_state.selected_items[key]
 
         if selected:
+            # Заголовки з дуже маленькими відступами
             st.write("") 
             h1, h2, h3, h4 = st.columns([3, 0.8, 1.2, 1])
             h1.caption("🏷️ Товар")
@@ -134,17 +112,25 @@ for i, cat in enumerate(EQUIPMENT_BASE.keys()):
             h4.caption("📈 Сума")
 
             for item in selected:
+                # Використовуємо контейнер, щоб тримати елементи разом
                 with st.container():
+                    # Зменшуємо пропорції колонок: [назва, кількість, ціна, сума]
                     cA, cB, cC, cD = st.columns([3, 0.8, 1.2, 1])
+                    
                     with cA:
+                        # Використовуємо невеликий текст для назви, щоб не розпирало рядок
                         st.markdown(f"<div style='padding-top: 5px;'><b>{item}</b></div>", unsafe_allow_html=True)
+                    
                     with cB:
                         qty = st.number_input("К-сть", min_value=1, value=1, key=f"qty_{cat}_{item}", label_visibility="collapsed")
+                    
                     with cC:
                         price = st.number_input("Ціна", min_value=0, value=int(EQUIPMENT_BASE[cat][item]), key=f"pr_{cat}_{item}", label_visibility="collapsed")
                     
                     subtotal = int(qty * price)
+                    
                     with cD:
+                        # Робимо суму жирною та вирівняною по центру вертикалі
                         st.markdown(f"<div style='padding-top: 5px;'><b>{subtotal:,}</b> грн</div>".replace(',', ' '), unsafe_allow_html=True)
                     
                     st.session_state.selected_items[f"{cat}_{item}"] = {
@@ -163,8 +149,8 @@ if all_selected_data:
     st.info(f"Загальна вартість КП: **{final_total:,}** грн".replace(',', ' '))
 
     if st.button("🚀 Згенерувати та завантажити КП", type="primary", use_container_width=True):
-        # 1. Створення документа Word
         doc = Document("template.docx")
+        
         replace_placeholders(doc, {
             "vendor_name": v_display, "vendor_full_name": v_full,
             "customer": customer, "address": address, "kp_num": kp_num, 
@@ -179,6 +165,7 @@ if all_selected_data:
                 "МАТЕРІАЛИ": ["3. Комплектуючі та щити"],
                 "РОБОТИ ТА ПОСЛУГИ": ["4. Послуги та Роботи"]
             }
+            
             for sec, cats in sections.items():
                 items = [x for x in all_selected_data if x["Категорія"] in cats]
                 if items:
@@ -188,6 +175,7 @@ if all_selected_data:
                     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     run = p.add_run(sec)
                     run.italic = True
+                    
                     for it in items:
                         r = target_table.add_row().cells
                         r[0].text = f" - {it['Найменування']}"
@@ -214,20 +202,9 @@ if all_selected_data:
         output = BytesIO()
         doc.save(output)
         output.seek(0)
-
-        # 2. ЗАПИС У GOOGLE SHEETS (Тільки при натисканні кнопки)
-        # Формат: Дата, Номер КП, Замовник, Адреса, Сума, Відповідальний
-        row_to_log = [date_str, kp_num, customer, address, final_total, manager]
-        success = save_to_google_sheets(row_to_log)
-        
-        if success:
-            st.success("✅ Дані успішно додано до Реєстру (Google Sheets)")
-        
-        # 3. Підготовка до завантаження файлу
-        safe_address = re.sub(r'[\\/*?:"<>|«»]', "", address).replace(" ", "_")
         st.download_button(
-            label="💾 Завантажити документ Word",
+            label="✅ Завантажити готовий файл",
             data=output,
-            file_name=f"КП_{kp_num}_{safe_address}.docx",
+            file_name=f"KP_{kp_num}.docx",
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
