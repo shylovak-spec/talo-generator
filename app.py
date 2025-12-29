@@ -29,7 +29,7 @@ def save_to_google_sheets(row_data):
         gc = gspread.authorize(creds)
         
         # Відкриття таблиці за назвою (переконайтеся, що доступ надано для talo-bot@...)
-        sh = gc.open("Реєстр КП Talo")
+        sh = gc.openall()[0]
         worksheet = sh.get_worksheet(0) # Беремо перший аркуш
         
         # Запис даних
