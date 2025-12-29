@@ -151,13 +151,13 @@ if all_selected_data:
     if st.button("🚀 Згенерувати та завантажити КП", type="primary", use_container_width=True):
         doc = Document("template.docx")
         
+        # Заміна текстових міток у шаблоні
         replace_placeholders(doc, {
             "vendor_name": v_display, "vendor_full_name": v_full,
             "customer": customer, "address": address, "kp_num": kp_num, 
             "manager": manager, "date": date_str, "phone": phone, "email": email,
             "txt_intro": txt_intro, "line1": l1, "line2": l2, "line3": l3
         })
-
         target_table = next((t for t in doc.tables if "Найменування" in t.rows[0].cells[0].text), None)
         if target_table:
             sections = {
@@ -202,9 +202,18 @@ if all_selected_data:
         output = BytesIO()
         doc.save(output)
         output.seek(0)
+
+        # ФОРМУЄМО НАЗВУ ФАЙЛУ ЗА АДРЕСОЮ
+        # Видаляємо спецсимволи та обмежуємо довжину, щоб назва була "чистою"
+        safe_address = re.sub(r'[\\/*?:"<>|«»]', "", address).replace(" ", "_")
+        # Беремо перші 50 символів адреси, щоб назва не була занадто довгою
+        generated_file_name = f"КП_№{kp_num}_{safe_address[:50]}_{date_str}.docx"
+
+        st.success(f"✅ Файл '{generated_file_name}' готовий!")
+        
         st.download_button(
-            label="✅ Завантажити готовий файл",
+            label="💾 Зберегти Комерційну Пропозицію",
             data=output,
-            file_name=f"KP_{kp_num}.docx",
+            file_name=generated_file_name,
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
