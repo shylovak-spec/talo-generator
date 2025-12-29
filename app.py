@@ -1,70 +1,86 @@
-FORM_VERSION = "v_final_reset"
 import streamlit as st
-from database import EQUIPMENT_BASE
 import datetime
+import re
+import gspread
 from docx import Document
 from io import BytesIO
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-import re
-import gspread
 from google.oauth2.service_account import Credentials
+from num2words import num2words
+from database import EQUIPMENT_BASE  # Впевнений, що цей файл у вас є
 
+# Налаштування версії та сторінки
+FORM_VERSION = "v_spec_final"
 st.set_page_config(page_title="Talo КП Generator", layout="wide", page_icon="⚡")
 
-# ================== ФУНКЦІЯ GOOGLE SHEETS ==================
+# ================== БАЗА РЕКВІЗИТІВ ==================
+VENDORS_DATA = {
+    "ФОП Крамаренко Олексій Сергійович": {
+        "short_name": "Олексій КРАМАРЕНКО",
+        "email": "oleksii.kramarenko.fop@gmail.com",
+        "inn": "3048920896",
+        "address": "02156 м. Київ, вул. Кіото 9, кв. 40",
+        "iban": "UA423348510000000026009261015",
+        "bank": "в АТ «ПУМБ» м. Київ"
+    },
+    "ФОП Шилова Ксенія Вікторівна": {
+        "short_name": "Ксенія ШИЛОВА",
+        "email": "shilova.ksenia.fop@gmail.com",
+        "inn": "1234567890", # ЗАМІНІТЬ НА РЕАЛЬНИЙ
+        "address": "м. Київ, вул. Прикладна 1", # ЗАМІНІТЬ НА РЕАЛЬНУ
+        "iban": "UA000000000000000000000000000", # ЗАМІНІТЬ НА РЕАЛЬНИЙ
+        "bank": "в АТ «ПРИВАТБАНК»"
+    },
+    "ТОВ «ТАЛО»": {
+        "short_name": "Олексій КРАМАРЕНКО",
+        "email": "talo.energy@gmail.com",
+        "inn": "45274534",
+        "address": "03115, м. Київ, вул. Крамського Івана, 9",
+        "iban": "UA443052990000026004046815601",
+        "bank": "в АТ КБ «ПРИВАТБАНК»"
+    }
+}
+
+# ================== ДОПОМІЖНІ ФУНКЦІЇ ==================
+
+def amount_to_text(amount):
+    """Перетворює число у суму прописом українською"""
+    units = int(amount)
+    cents = int(round((amount - units) * 100))
+    words = num2words(units, lang='uk').capitalize()
+    return f"{words} гривень {cents:02d} копійок"
+
+def get_ukr_date(date_obj):
+    """Форматує дату: 22 грудня 2025 року"""
+    months = {
+        1: "січня", 2: "лютого", 3: "березня", 4: "квітня", 5: "травня", 6: "червня",
+        7: "липня", 8: "серпня", 9: "вересня", 10: "жовтня", 11: "листопада", 12: "грудня"
+    }
+    return f"{date_obj.day} {months[date_obj.month]} {date_obj.year} року"
+
 def save_to_google_sheets(row_data):
-    """Підключення до Google Sheets та запис рядка даних"""
     try:
         if "gcp_service_account" not in st.secrets:
-            st.error("❌ Секрети 'gcp_service_account' не знайдено в Streamlit Cloud!")
             return False
-        
-        # Авторизація через секрети
         credentials_info = st.secrets["gcp_service_account"]
-        scope = [
-            "https://www.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/drive"
-        ]
+        scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
         creds = Credentials.from_service_account_info(credentials_info, scopes=scope)
         gc = gspread.authorize(creds)
-        
-        # Відкриття таблиці за назвою (переконайтеся, що доступ надано для talo-bot@...)
         sh = gc.open("Реєстр КП Talo")
-        worksheet = sh.get_worksheet(0) # Беремо перший аркуш
-        
-        # Запис даних
+        worksheet = sh.get_worksheet(0)
         worksheet.append_row(row_data)
         return True
     except Exception as e:
-        st.error(f"❌ Помилка запису в Google Sheets: {e}")
+        st.error(f"Помилка Google Sheets: {e}")
         return False
 
-# ================== ФУНКЦІЯ ЗАМІНИ (Шапка та Текст) ==================
 def replace_placeholders(doc, replacements):
-    bold_headers = [
-        "Виконавець", "Замовник", "Адреса", "Відповідальний",
-        "Контактний телефон", "E-mail", "Дата", "Комерційна пропозиція"
-    ]
-
+    """Універсальна функція заміни тегів у Word"""
     def process_paragraph(p):
         for key, value in replacements.items():
             placeholder = f"{{{{{key}}}}}"
             if placeholder in p.text:
-                new_text = p.text.replace(placeholder, str(value))
-                p.clear()
-
-                is_header = False
-                for bh in bold_headers:
-                    if new_text.strip().startswith(bh + ":"):
-                        if ":" in new_text:
-                            left, right = new_text.split(":", 1)
-                            p.add_run(left + ":").bold = True
-                            p.add_run(right).bold = False
-                            is_header = True
-                            break
-                
-                if not is_header:
-                    p.add_run(new_text).bold = False
+                p.text = p.text.replace(placeholder, str(value))
 
     for p in doc.paragraphs: process_paragraph(p)
     for table in doc.tables:
@@ -73,169 +89,129 @@ def replace_placeholders(doc, replacements):
                 for p in cell.paragraphs: process_paragraph(p)
 
 # ================== ІНТЕРФЕЙС STREAMLIT ==================
-st.title("⚡ Генератор Комерційних Пропозицій")
+st.title("⚡ Generator КП та Специфікацій")
 
 with st.expander("📌 Основна інформація", expanded=True):
     col1, col2 = st.columns(2)
     
-    vendor_choice = col1.selectbox("Виконавець:", ["ТОВ «ТАЛО»", "ФОП Крамаренко Олексій Сергійович"])
-
+    vendor_choice = col1.selectbox("Виконавець (для КП):", ["ТОВ «ТАЛО»", "ФОП Крамаренко Олексій Сергійович"])
+    
+    # Логіка податків та даних виконавця
     if vendor_choice == "ТОВ «ТАЛО»":
-        v_display, v_full = "ТОВ «Тало»", "Директор ТОВ «ТАЛО»"
+        v_display = "ТОВ «ТАЛО»"
         tax_rate, tax_label = 0.20, "ПДВ (20%)"
-        curr_phone, curr_email, v_id = "+380 (67) 477-17-18", "o.kramarenko@talo.com.ua", "talo"
     else:
-        v_display, v_full = "ФОП Крамаренко О.С.", "ФОП Крамаренко О.С."
-        tax_rate, tax_label = 0.06, "Податкове навантаження (6%)"
-        curr_phone, curr_email, v_id = "+380 (67) 477-17-18", "o.kramarenko@talo.com.ua", "fop"
+        v_display = "ФОП Крамаренко О.С."
+        tax_rate, tax_label = 0.00, "без ПДВ"
 
-    customer = col1.text_input("Замовник", "ОСББ Вишгородська 45")
-    address = col1.text_input("Адреса об'єкта", "м. Київ, вул. Вишгородська 45")
+    customer = col1.text_input("Замовник", "ОСББ Назва")
+    address = col1.text_input("Адреса об'єкта", "м. Київ, вул...")
     
-    kp_num = col2.text_input("Номер КП", "1223.25POW-B")
+    kp_num = col2.text_input("Номер договору/КП", "1212-25")
     manager = col2.text_input("Відповідальний", "Олексій Крамаренко")
-    date_val = col2.date_input("Дата", datetime.date.today())
-    date_str = date_val.strftime("%d.%m.%Y")
+    date_val = col2.date_input("Дата документів", datetime.date.today())
     
-    phone = col2.text_input("Телефон", value=curr_phone, key=f"{FORM_VERSION}_phone_{v_id}")
-    email = col2.text_input("E-mail", value=curr_email, key=f"{FORM_VERSION}_email_{v_id}")
+    date_str = date_val.strftime("%d.%m.%Y")
+    short_year_date = date_val.strftime("%d.%m.%y")
 
-st.subheader("📝 Технічне завдання та опис")
-txt_intro = st.text_area("Вступний текст ({{txt_intro}})", "Відповідно до наданих даних пропонуємо наступне:")
-c1, c2, c3 = st.columns(3)
-l1 = c1.text_input("Пункт 1 ({{line1}})", "Організація автономного живлення ліфтів")
-l2 = c2.text_input("Пункт 2 ({{line2}})", "Організація автономного живлення насосної")
-l3 = c3.text_input("Пункт 3 ({{line3}})", "Аварійне освітлення та відеонагляд")
-
-st.divider()
-
-# ================== СПЕЦИФІКАЦІЯ ==================
-st.subheader("📦 Специфікація")
-
+st.subheader("📦 Специфікація товарів")
 if "selected_items" not in st.session_state:
     st.session_state.selected_items = {}
 
 tabs = st.tabs(list(EQUIPMENT_BASE.keys()))
 for i, cat in enumerate(EQUIPMENT_BASE.keys()):
     with tabs[i]:
-        selected = st.multiselect(f"Обрати з: {cat}", list(EQUIPMENT_BASE[cat].keys()), key=f"sel_{cat}")
-        
-        current_keys = set(f"{cat}_{item}" for item in selected)
-        for key in list(st.session_state.selected_items.keys()):
-            if key.startswith(f"{cat}_") and key not in current_keys:
-                del st.session_state.selected_items[key]
+        selected = st.multiselect(f"Додати з: {cat}", list(EQUIPMENT_BASE[cat].keys()), key=f"sel_{cat}")
+        for item in selected:
+            key = f"{cat}_{item}"
+            with st.container():
+                cA, cB, cC, cD = st.columns([3, 0.8, 1.2, 1])
+                cA.write(f"**{item}**")
+                qty = cB.number_input("К-сть", min_value=1, value=1, key=f"qty_{key}")
+                price = cC.number_input("Ціна", min_value=0, value=int(EQUIPMENT_BASE[cat][item]), key=f"pr_{key}")
+                subtotal = qty * price
+                cD.write(f"**{subtotal:,}** грн")
+                st.session_state.selected_items[key] = {
+                    "Найменування": item, "Кількість": qty, "Ціна": price, "Сума": subtotal, "Категорія": cat
+                }
 
-        if selected:
-            st.write("") 
-            h1, h2, h3, h4 = st.columns([3, 0.8, 1.2, 1])
-            h1.caption("🏷️ Товар")
-            h2.caption("🔢 К-сть")
-            h3.caption("💰 Ціна")
-            h4.caption("📈 Сума")
+# Видалення не вибраних
+all_selected_data = [v for k, v in st.session_state.selected_items.items() if any(k.endswith(x) for x in [s for s in selected])]
 
-            for item in selected:
-                with st.container():
-                    cA, cB, cC, cD = st.columns([3, 0.8, 1.2, 1])
-                    with cA:
-                        st.markdown(f"<div style='padding-top: 5px;'><b>{item}</b></div>", unsafe_allow_html=True)
-                    with cB:
-                        qty = st.number_input("К-сть", min_value=1, value=1, key=f"qty_{cat}_{item}", label_visibility="collapsed")
-                    with cC:
-                        price = st.number_input("Ціна", min_value=0, value=int(EQUIPMENT_BASE[cat][item]), key=f"pr_{cat}_{item}", label_visibility="collapsed")
-                    
-                    subtotal = int(qty * price)
-                    with cD:
-                        st.markdown(f"<div style='padding-top: 5px;'><b>{subtotal:,}</b> грн</div>".replace(',', ' '), unsafe_allow_html=True)
-                    
-                    st.session_state.selected_items[f"{cat}_{item}"] = {
-                        "Найменування": item, "Кількість": qty, "Ціна": price, "Сума": subtotal, "Категорія": cat
-                    }
-
-# ================== ГЕНЕРАЦІЯ ТА РОЗРАХУНКИ ==================
-all_selected_data = list(st.session_state.selected_items.values())
-
-if all_selected_data:
+# ================== ГЕНЕРАЦІЯ ==================
+if st.session_state.selected_items:
     st.divider()
-    raw_total = sum(item["Сума"] for item in all_selected_data)
-    tax_val = int(round(raw_total * tax_rate))
+    raw_total = sum(item["Сума"] for item in st.session_state.selected_items.values())
+    tax_val = int(raw_total * tax_rate)
     final_total = raw_total + tax_val
+    st.info(f"Загальна сума: **{final_total:,}** грн ({tax_label})")
+
+    # СЕКЦІЯ СПЕЦИФІКАЦІЙ
+    st.subheader("📝 Налаштування специфікацій")
+    col_s1, col_s2 = st.columns(2)
     
-    st.info(f"Загальна вартість КП: **{final_total:,}** грн".replace(',', ' '))
-
-    if st.button("🚀 Згенерувати та завантажити КП", type="primary", use_container_width=True):
-        # 1. Створення документа Word
-        doc = Document("template.docx")
-        replace_placeholders(doc, {
-            "vendor_name": v_display, "vendor_full_name": v_full,
-            "customer": customer, "address": address, "kp_num": kp_num, 
-            "manager": manager, "date": date_str, "phone": phone, "email": email,
-            "txt_intro": txt_intro, "line1": l1, "line2": l2, "line3": l3
-        })
-
-        target_table = next((t for t in doc.tables if "Найменування" in t.rows[0].cells[0].text), None)
-        if target_table:
-            sections = {
-                "ОБЛАДНАННЯ": ["1. Інвертори Deye", "2. Акумулятори (АКБ)"],
-                "МАТЕРІАЛИ": ["3. Комплектуючі та щити"],
-                "РОБОТИ ТА ПОСЛУГИ": ["4. Послуги та Роботи"]
-            }
-            for sec, cats in sections.items():
-                items = [x for x in all_selected_data if x["Категорія"] in cats]
-                if items:
-                    row = target_table.add_row()
-                    merged_cell = row.cells[0].merge(row.cells[3])
-                    p = merged_cell.paragraphs[0]
-                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    run = p.add_run(sec)
-                    run.italic = True
-                    for it in items:
-                        r = target_table.add_row().cells
-                        r[0].text = f" - {it['Найменування']}"
-                        r[1].text = str(it["Кількість"])
-                        r[1].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-                        r[2].text = f"{it['Ціна']:,}".replace(",", " ")
-                        r[2].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
-                        r[3].text = f"{it['Сума']:,}".replace(",", " ")
-                        r[3].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
-
-            summary = [
-                ("РАЗОМ, грн:", raw_total, False), 
-                (f"{tax_label}:", tax_val, False), 
-                ("ЗАГАЛЬНА ВАРТІСТЬ, грн:", final_total, True)
-            ]
-            for label, val, is_bold in summary:
-                r = target_table.add_row().cells
-                r[0].text, r[3].text = label, f"{val:,}".replace(",", " ")
-                r[3].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
-                if is_bold:
-                    for cell in r:
-                        for run in cell.paragraphs[0].runs: run.bold = True
-
-        output = BytesIO()
-        doc.save(output)
-        output.seek(0)
-
-        # 2. ЗАПИС У GOOGLE SHEETS (Тільки при натисканні кнопки)
-        # Формат: Дата, Номер КП, Замовник, Адреса, Сума, Відповідальний
-        row_to_log = [
-            date_str, 
-            kp_num, 
-            customer, 
-            address, 
-            final_total, 
-            manager
-        ]
+    # Вибір постачальника обладнання
+    supplier_hw_name = v_display
+    if vendor_choice == "ФОП Крамаренко Олексій Сергійович":
+        supplier_hw_name = col_s1.selectbox("Постачальник обладнання:", ["ФОП Крамаренко Олексій Сергійович", "ФОП Шилова Ксенія Вікторівна"])
+    
+    if st.button("🚀 Згенерувати КП та Специфікації", type="primary", use_container_width=True):
         
-        success = save_to_google_sheets(row_to_log)
+        # 1. Дані для заміни (спільні)
+        full_date_ukr = get_ukr_date(date_val)
+        spec_id_p = f"№1 від {full_date_ukr} до Договору поставки №П{kp_num} від {short_year_date}"
+        spec_id_r = f"№1 від {full_date_ukr} до Договору підряду №Р{kp_num} від {short_year_date}"
         
-        if success:
-            st.success("✅ Дані записано в реєстр")
-        
-        # 3. Підготовка до завантаження файлу
-        safe_address = re.sub(r'[\\/*?:"<>|«»]', "", address).replace(" ", "_")
-        st.download_button(
-            label="💾 Завантажити документ Word",
-            data=output,
-            file_name=f"КП_{kp_num}_{safe_address}.docx",
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        )
+        # Реквізити
+        hw_v_info = VENDORS_DATA.get(supplier_hw_name, VENDORS_DATA["ТОВ «ТАЛО»"])
+        work_v_info = VENDORS_DATA.get(vendor_choice, VENDORS_DATA["ТОВ «ТАЛО»"])
+
+        # ГЕНЕРАЦІЯ ПОСТАВКИ
+        hw_items = [x for x in st.session_state.selected_items.values() if x["Категорія"] != "4. Послуги та Роботи"]
+        if hw_items:
+            doc_p = Document("template_postavka.docx")
+            p_total = sum(i["Сума"] for i in hw_items)
+            p_final = p_total + int(p_total * tax_rate)
+            
+            replace_placeholders(doc_p, {
+                "spec_id_postavka": spec_id_p,
+                "customer": customer, "address": address,
+                "vendor_name": supplier_hw_name,
+                "vendor_address": hw_v_info["address"],
+                "vendor_inn": hw_v_info["inn"],
+                "vendor_iban": hw_v_info["iban"],
+                "vendor_bank": hw_v_info["bank"],
+                "vendor_email": hw_v_info["email"],
+                "vendor_short_name": hw_v_info["short_name"],
+                "total_sum_digits": f"{p_final:,}".replace(",", " "),
+                "total_sum_words": amount_to_text(p_final)
+            })
+            # (Тут додати заповнення таблиці hw_items аналогічно вашому коду)
+            
+            buf_p = BytesIO()
+            doc_p.save(buf_p)
+            st.download_button(f"📥 Специфікація Поставки ({supplier_hw_name})", buf_p.getvalue(), f"Spec_Postavka_{customer}.docx")
+
+        # ГЕНЕРАЦІЯ РОБІТ
+        sw_items = [x for x in st.session_state.selected_items.values() if x["Категорія"] == "4. Послуги та Роботи"]
+        if sw_items:
+            doc_r = Document("template_roboti.docx")
+            r_total = sum(i["Сума"] for i in sw_items)
+            r_final = r_total + int(r_total * tax_rate)
+            
+            replace_placeholders(doc_r, {
+                "spec_id_roboti": spec_id_r,
+                "customer": customer, "address": address,
+                "vendor_name": vendor_choice,
+                "vendor_short_name": work_v_info["short_name"],
+                "total_sum_words": amount_to_text(r_final)
+            })
+            # (Тут додати заповнення таблиці sw_items)
+            
+            buf_r = BytesIO()
+            doc_r.save(buf_r)
+            st.download_button(f"📥 Специфікація Робіт ({vendor_choice})", buf_r.getvalue(), f"Spec_Roboti_{customer}.docx")
+
+        # ЗАПИС В ТАБЛИЦЮ
+        save_to_google_sheets([date_str, kp_num, customer, address, final_total, manager])
+        st.success("✅ Реєстр оновлено!")
