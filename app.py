@@ -36,8 +36,8 @@ def save_to_google_sheets(row_data):
         worksheet.append_row(row_data)
         return True
     except Exception as e:
-        st.error(f"❌ Помилка запису в Google Sheets: {e}")
-        return False
+    st.exception(e)
+    return False
 
 # ================== ФУНКЦІЯ ЗАМІНИ (Шапка та Текст) ==================
 def replace_placeholders(doc, replacements):
