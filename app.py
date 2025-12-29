@@ -202,9 +202,13 @@ if all_selected_data:
         output = BytesIO()
         doc.save(output)
         output.seek(0)
+
+        # Додаємо очищення адреси для назви файлу
+        safe_address = re.sub(r'[\\/*?:"<>|«»]', "", address).replace(" ", "_")
+
         st.download_button(
             label="✅ Завантажити готовий файл",
             data=output,
-            file_name=f"KP_{kp_num}.docx",
+            file_name=f"КП_{kp_num}_{safe_address}.docx", # ОСЬ ТУТ ЗМІНА
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
