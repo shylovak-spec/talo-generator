@@ -99,39 +99,124 @@ l1 = c1.text_input("Пункт 1", "Організація автономног�
 l2 = c2.text_input("Пункт 2", "Організація автономного живлення насосної")
 l3 = c3.text_input("Пункт 3", "Аварійне освітлення та відеонагляд")
 
-st.subheader("📦 Специфікація")
-if "selected_items" not in st.session_state: st.session_state.selected_items = {}
+st.subheader("📦 Специфікація та редагування")
+
+if "selected_items" not in st.session_state:
+    st.session_state.selected_items = {}
 
 tabs = st.tabs(list(EQUIPMENT_BASE.keys()))
+
 for i, cat in enumerate(EQUIPMENT_BASE.keys()):
     with tabs[i]:
-        selected = st.multiselect(f"Додати з {cat}:", list(EQUIPMENT_BASE[cat].keys()), key=f"s_{cat}")
-        for item in selected:
-            key = f"{cat}_{item}"
-            cA, cB, cC, cD = st.columns([3, 0.8, 1.2, 1])
-            qty = cB.number_input("К-сть", 1, 100, 1, key=f"q_{key}")
-            price = cC.number_input("Ціна", 0, 1000000, int(EQUIPMENT_BASE[cat][item]), key=f"p_{key}")
-            sub = qty * price
-            cD.write(f"**{sub:,}** грн")
-            st.session_state.selected_items[key] = {"name": item, "qty": qty, "p": price, "sum": sub, "cat": cat}
+        # 1. Вибір товарів
+        selected_names = st.multiselect(
+            f"Додати з {cat}:", 
+            list(EQUIPMENT_BASE[cat].keys()), 
+            key=f"ms_{cat}"
+        )
+        
+        # 2. Видаляємо з session_state те, що було деселектовано
+        current_cat_keys = [f"{cat}_{name}" for name in selected_names]
+        for key in list(st.session_state.selected_items.keys()):
+            if key.startswith(f"{cat}_") and key not in current_cat_keys:
+                del st.session_state.selected_items[key]
+
+        # 3. Відображення списку для редагування
+        if selected_names:
+            st.write("")
+            h1, h2, h3, h4 = st.columns([3, 1, 1.2, 1])
+            h1.caption("🏷️ Найменування")
+            h2.caption("🔢 Кількість")
+            h3.caption("💰 Ціна за од.")
+            h4.caption("📈 Сума")
+
+            for name in selected_names:
+                key = f"{cat}_{name}"
+                # Беремо ціну з бази як дефолтну
+                base_price = int(EQUIPMENT_BASE[cat][name])
+                
+                # Створюємо рядок редагування
+                with st.container():
+                    col_n, col_q, col_p, col_s = st.columns([3, 1, 1.2, 1])
+                    
+                    col_n.markdown(f"<div style='padding-top: 5px;'>{name}</div>", unsafe_allow_html=True)
+                    
+                    # Поле кількості
+                    edit_qty = col_q.number_input(
+                        "К-сть", min_value=1, value=1, 
+                        key=f"edit_q_{key}", label_visibility="collapsed"
+                    )
+                    
+                    # Поле ціни (можна міняти вручну)
+                    edit_price = col_p.number_input(
+                        "Ціна", min_value=0, value=base_price, 
+                        key=f"edit_p_{key}", label_visibility="collapsed"
+                    )
+                    
+                    # Розрахунок суми рядка
+                    current_sum = edit_qty * edit_price
+                    
+                    # Вивід суми з гарним форматуванням
+                    col_s.markdown(
+                        f"<div style='padding-top: 5px;'><b>{current_sum:,}</b> грн</div>".replace(',', ' '), 
+                        unsafe_allow_html=True
+                    )
+                    
+                    # Обов'язково записуємо актуальні дані в стан сесії
+                    st.session_state.selected_items[key] = {
+                        "name": name,
+                        "qty": edit_qty,
+                        "p": edit_price,
+                        "sum": current_sum,
+                        "cat": cat
+                    }
 
 # ================== ГЕНЕРАЦІЯ ==================
 all_items = [v_it for k_it, v_it in st.session_state.selected_items.items() if any(k_it.startswith(c) for c in list(EQUIPMENT_BASE.keys()))]
 
 if all_items:
     st.divider()
+    
+    # --- РОЗРАХУНОК ЗАГАЛЬНИХ СУМ ---
+    total_pure = sum(it["sum"] for it in all_items)
+    tax_amount = round(total_pure * v['tax_rate'], 2)
+    total_with_tax = round(total_pure + tax_amount, 2)
+    
+    # Виводимо підказку для перевірки в інтерфейс
+    st.info(f"Сума: {total_pure:,.2f} грн | {v['tax_label']}: {tax_amount:,.2f} грн | **РАЗОМ: {total_with_tax:,.2f} грн**".replace(',', ' '))
+
     if st.button("🚀 ЗГЕНЕРУВАТИ ВСІ ДОКУМЕНТИ", type="primary", use_container_width=True):
         full_date_ukr = f"{date_val.day} { {1:'січня',2:'лютого',3:'березня',4:'квітня',5:'травня',6:'червня',7:'липня',8:'серпня',9:'вересня',10:'жовтня',11:'листопада',12:'грудня'}[date_val.month]} {date_val.year} року"
         safe_addr = re.sub(r'[\\/*?:"<>|]', "", address).replace(" ", "_")
         
-        # Спільні реквізити для всіх файлів
+        # Спільні реквізити для всіх файлів (ОНОВЛЕНО)
         base_reps = {
-            "vendor_name": v["full"], "vendor_address": v["adr"], "vendor_inn": v["inn"],
-            "vendor_iban": v["iban"], "vendor_email": email, "vendor_short_name": v["short"],
-            "customer": customer, "address": address, "kp_num": kp_num, "date": date_str,
-            "manager": manager, "phone": phone, "email": email, "txt_intro": txt_intro,
-            "line1": l1, "line2": l2, "line3": l3
+            "vendor_name": v["full"], 
+            "vendor_address": v["adr"], 
+            "vendor_inn": v["inn"],
+            "vendor_iban": v["iban"], 
+            "vendor_email": email, 
+            "vendor_short_name": v["short"],
+            "customer": customer, 
+            "address": address, 
+            "kp_num": kp_num, 
+            "date": date_str,
+            "manager": manager, 
+            "phone": phone, 
+            "email": email, 
+            "txt_intro": txt_intro,
+            "line1": l1, 
+            "line2": l2, 
+            "line3": l3,
+            # Додаємо суми для тегів у специфікаціях
+            "total_sum_digits": f"{total_with_tax:,.2f}".replace(",", " "),
+            "total_sum_words": amount_to_text_uk(total_with_tax),
+            "tax_label": v['tax_label'],
+            "tax_amount_val": f"{tax_amount:,.2f}".replace(",", " ")
         }
+        
+        files_results = {}
+        # Далі йде логіка створення docx...
         
         files_results = {}
 
