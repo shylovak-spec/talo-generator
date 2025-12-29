@@ -1,7 +1,7 @@
 # ------------------- КП -------------------
-if os.path.exists("template.docx"):
-    doc_kp = Document("template.docx")
-    replace_placeholders_stable(doc_kp, base_reps)
+template_path = "templates/template.docx"
+if os.path.exists(template_path):
+    doc_kp = Document(template_path)
     
     # Жирне форматування ключових слів
     for p in doc_kp.paragraphs:
