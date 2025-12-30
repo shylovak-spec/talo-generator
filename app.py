@@ -1,5 +1,8 @@
 import streamlit as st
 import gspread
+import requests
+import subprocess
+import tempfile
 from google.oauth2.service_account import Credentials
 from docx import Document
 from docx.shared import Pt
@@ -38,7 +41,7 @@ VENDORS = {
     }
 }
 
-# ================== ДОПОМІЖНІ ФУНКЦІЇ (ШРИФТИ) ==================
+# ================== ДОПОМІЖНІ ФУНКЦІЇ ==================
 def set_document_font(doc):
     """Встановлює базовий шрифт для всього документа"""
     style = doc.styles['Normal']
@@ -160,8 +163,6 @@ def fill_document_table(tbl, items, tax_label, tax_rate):
             set_cell_style(row[3], format_num(val), WD_ALIGN_PARAGRAPH.RIGHT, is_bold)
     return total_val
 
-import requests
-
 def send_to_telegram(file_data, file_name):
     """Відправка файлу керівнику в Telegram"""
     try:
@@ -199,6 +200,29 @@ def save_to_google_sheets(row_data):
     except Exception as e:
         st.error(f"❌ Помилка запису в Google Sheets: {e}")
         return False
+
+def convert_docx_to_pdf(docx_data):
+    """Конвертує docx (BytesIO) у pdf (BytesIO) за допомогою LibreOffice"""
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            docx_path = os.path.join(tmpdir, "temp.docx")
+            with open(docx_path, "wb") as f:
+                f.write(docx_data.getvalue())
+            
+            # Команда для конвертації (працює на Linux/Streamlit Cloud)
+            subprocess.run([
+                'lowriter', '--headless', '--convert-to', 'pdf', 
+                '--outdir', tmpdir, docx_path
+            ], check=True)
+            
+            pdf_path = os.path.join(tmpdir, "temp.pdf")
+            with open(pdf_path, "rb") as f:
+                return BytesIO(f.read())
+    except Exception as e:
+        st.error(f"❌ Помилка конвертації: {e}")
+        return None
+
+
 
 # ================== ІНТЕРФЕЙС STREAMLIT ==================
 st.set_page_config(page_title="Talo Generator", layout="wide")
@@ -322,7 +346,7 @@ if all_items:
 if st.session_state.generated_files:
     st.write("### 📂 Дії з документами:")
     
-    # Створюємо колонки для кнопок завантаження
+    # Кнопки завантаження Word-файлів
     cols = st.columns(len(st.session_state.generated_files))
     for i, (k, info) in enumerate(st.session_state.generated_files.items()):
         cols[i].download_button(
@@ -334,11 +358,17 @@ if st.session_state.generated_files:
 
     st.divider()
     
-    # Блок відправки в Telegram
     if "kp" in st.session_state.generated_files:
-        st.write("### ✈️ Швидка відправка керівнику:")
+        st.write("### ✈️ Швидка відправка керівнику (PDF):")
         kp_info = st.session_state.generated_files["kp"]
-        if st.button("🚀 Надіслати Комерційну пропозицію в Telegram", use_container_width=True):
-            # Важливо: скидаємо покажчик перед читанням
-            kp_info['data'].seek(0)
-            send_to_telegram(kp_info['data'], kp_info['name'])
+        
+        # Кнопка для PDF-відправки
+        if st.button("🚀 Надіслати КП у форматі PDF", use_container_width=True):
+            with st.spinner("⏳ Конвертуємо у PDF..."):
+                kp_info['data'].seek(0)
+                pdf_buffer = convert_docx_to_pdf(kp_info['data'])
+                
+                if pdf_buffer:
+                    # Формуємо ідентичну назву, але з .pdf
+                    pdf_name = kp_info['name'].replace(".docx", ".pdf")
+                    send_to_telegram(pdf_buffer, pdf_name)
