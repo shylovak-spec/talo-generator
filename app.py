@@ -1,3 +1,4 @@
+from docx.shared import Pt
 import streamlit as st
 from database import EQUIPMENT_BASE
 import datetime
@@ -36,6 +37,12 @@ VENDORS = {
 }
 
 # ================== ДОПОМІЖНІ ФУНКЦІЇ ==================
+def set_document_font(doc):
+    style = doc.styles['Normal']
+    font = style.font
+    font.name = 'Times New Roman'
+    font.size = Pt(12)
+    
 def format_num(n):
     return f"{math.ceil(n):,}".replace(",", " ")
 
@@ -53,59 +60,55 @@ def set_cell_style(cell, text, align=WD_ALIGN_PARAGRAPH.LEFT, bold=False):
     p.alignment = align
     run = p.add_run(str(text))
     run.bold = bold
+    # Налаштування шрифту
+    run.font.name = 'Times New Roman'
+    run.font.size = Pt(12)
+
 
 def replace_headers_styled(doc, reps):
-    """
-    Виконує заміну тегів у тексті та гарантовано робить ключові поля ЖИРНИМИ.
-    """
     bold_labels = [
         "Комерційна пропозиція:", "Дата:", "Замовник:", 
         "Адреса:", "Виконавець:", "Контактний телефон:", 
         "Відповідальний:", "E-mail:"
     ]
-        
-    # 1. Обробка звичайних параграфів
-    for p in doc.paragraphs:
-        # Спочатку заміна тегів
+    
+    # Збираємо ВСІ параграфи (текст + таблиці)
+    all_paragraphs = list(doc.paragraphs)
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                all_paragraphs.extend(cell.paragraphs)
+
+    for p in all_paragraphs:
+        # 1. Заміна тегів {{key}}
         for key, val in reps.items():
             if f"{{{{{key}}}}}" in p.text:
-                p.text = p.text.replace(f"{{{{{key}}}}}", str(val))
+                full_text = p.text.replace(f"{{{{{key}}}}}", str(val))
+                p.clear()
+                run = p.add_run(full_text)
+                run.font.name = 'Times New Roman'
+                run.font.size = Pt(12)
         
-        # Потім жирний шрифт
+        # 2. Робимо заголовки жирними
         for label in bold_labels:
             if label in p.text:
                 full_text = p.text
                 p.clear()
                 parts = full_text.split(label, 1)
-                run_label = p.add_run(label)
-                run_label.bold = True
+                
+                # Мітка (Жирна)
+                run_l = p.add_run(label)
+                run_l.bold = True
+                run_l.font.name = 'Times New Roman'
+                run_l.font.size = Pt(12)
+                
+                # Значення (Звичайне)
                 if len(parts) > 1:
-                    run_value = p.add_run(parts[1])
-                    run_value.bold = False
+                    run_v = p.add_run(parts[1])
+                    run_v.bold = False
+                    run_v.font.name = 'Times New Roman'
+                    run_v.font.size = Pt(12)
                 break
-
-    # 2. Виправлена обробка ТАБЛИЦЬ (те, що у вас в кінці)
-    for table in doc.tables:
-        for row in table.rows:
-            for cell in row.cells:
-                for p in cell.paragraphs:
-                    # Крок А: Заміна тегів (тепер вірно використовуємо reps)
-                    for key, val in reps.items():
-                        if f"{{{{{key}}}}}" in p.text:
-                            p.text = p.text.replace(f"{{{{{key}}}}}", str(val))
-                    
-                    # Крок Б: Жирне форматування для таблиці
-                    for label in bold_labels:
-                        if label in p.text:
-                            full_text = p.text
-                            p.clear()
-                            parts = full_text.split(label, 1)
-                            run_label = p.add_run(label)
-                            run_label.bold = True
-                            if len(parts) > 1:
-                                run_value = p.add_run(parts[1])
-                                run_value.bold = False
-                            break
 
 def fill_document_table(tbl, items, tax_label, tax_rate):
     """
@@ -146,14 +149,15 @@ def fill_document_table(tbl, items, tax_label, tax_rate):
         if col_count >= 4:
             row_h[0].merge(row_h[col_count-1])
             
-        row_h[0].text = "" # Очищуємо клітинку
+        row_h[0].text = "" 
         p = row_h[0].paragraphs[0]
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         
-        # .upper() робить текст КАПСОМ
         run = p.add_run(section.upper()) 
-        run.italic = True  # Робимо КУРСИВ
-        run.bold = False   # Вимикаємо ЖИРНИЙ
+        run.italic = True
+        run.bold = False
+        run.font.name = 'Times New Roman'
+        run.font.size = Pt(12)
         
         # Товари
         for it in sec_items:
@@ -291,6 +295,7 @@ if all_items:
         # 1. КП (template.docx)
         if os.path.exists("template.docx"):
             doc_kp = Document("template.docx")
+            set_document_font(doc_kp)
             replace_headers_styled(doc_kp, base_reps) # Заміна з жирними заголовками
             
             # Шукаємо таблицю
@@ -306,6 +311,7 @@ if all_items:
         hw = [i for i in all_items if "роботи" not in i["cat"].lower()]
         if hw and os.path.exists("template_postavka.docx"):
             doc_p = Document("template_postavka.docx")
+            set_document_font(doc_p)
             
             # Локальна сума для цього документа
             local_sum = sum(i['sum'] for i in hw)
@@ -330,6 +336,7 @@ if all_items:
         wrk = [i for i in all_items if "роботи" in i["cat"].lower()]
         if wrk and os.path.exists("template_roboti.docx"):
             doc_w = Document("template_roboti.docx")
+            set_document_font(doc_w)
             
             local_sum = sum(i['sum'] for i in wrk)
             local_total = local_sum + math.ceil(local_sum * v['tax_rate'])
