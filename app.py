@@ -144,12 +144,19 @@ def fill_document_table(tbl, items, tax_label, tax_rate):
         sec_items = grouped_items[section]
         if not sec_items: continue
         
-        # Рядок заголовку категорії (Жирний, по центру)
+        # Рядок заголовку категорії (не жирний, по центру)
         row_h = tbl.add_row().cells
         if col_count >= 4:
             row_h[0].merge(row_h[col_count-1])
+            
+        row_h[0].text = "" # Очищуємо клітинку
+        p = row_h[0].paragraphs[0]
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         
-        set_cell_style(row_h[0], section, WD_ALIGN_PARAGRAPH.CENTER, False)
+        # .upper() робить текст КАПСОМ
+        run = p.add_run(section.upper()) 
+        run.italic = True  # Робимо КУРСИВ
+        run.bold = False   # Вимикаємо ЖИРНИЙ
         
         # Товари
         for it in sec_items:
