@@ -160,6 +160,27 @@ def fill_document_table(tbl, items, tax_label, tax_rate):
             set_cell_style(row[3], format_num(val), WD_ALIGN_PARAGRAPH.RIGHT, is_bold)
     return total_val
 
+import requests
+
+def send_to_telegram(file_data, file_name):
+    """Відправка файлу керівнику в Telegram"""
+    try:
+        token = st.secrets["telegram_bot_token"]
+        chat_id = st.secrets["telegram_chat_id"]
+        url = f"https://api.telegram.org/bot{token}/sendDocument"
+        
+        # Підготовка файлу
+        files = {'document': (file_name, file_data)}
+        data = {'chat_id': chat_id, 'caption': f"🚀 Нова комерційна пропозиція!\n📄 Файл: {file_name}"}
+        
+        response = requests.post(url, data=data, files=files)
+        if response.status_code == 200:
+            st.success("✅ КП успішно надіслано керівнику в Telegram!")
+        else:
+            st.error(f"❌ Помилка Telegram: {response.text}")
+    except Exception as e:
+        st.error(f"❌ Не вдалося відправити файл: {e}")
+
 # ================== GOOGLE SHEETS ФУНКЦІЯ ==================
 def save_to_google_sheets(row_data):
     """Підключення до Google Sheets та запис рядка даних через Secrets"""
@@ -299,7 +320,25 @@ if all_items:
         st.rerun()
 
 if st.session_state.generated_files:
-    st.write("### 📂 Завантажити документи:")
+    st.write("### 📂 Дії з документами:")
+    
+    # Створюємо колонки для кнопок завантаження
     cols = st.columns(len(st.session_state.generated_files))
     for i, (k, info) in enumerate(st.session_state.generated_files.items()):
-        cols[i].download_button(label=f"💾 {info['name']}", data=info['data'], file_name=info['name'], key=f"dl_{k}")
+        cols[i].download_button(
+            label=f"💾 {info['name']}", 
+            data=info['data'], 
+            file_name=info['name'], 
+            key=f"dl_{k}"
+        )
+
+    st.divider()
+    
+    # Блок відправки в Telegram
+    if "kp" in st.session_state.generated_files:
+        st.write("### ✈️ Швидка відправка керівнику:")
+        kp_info = st.session_state.generated_files["kp"]
+        if st.button("🚀 Надіслати Комерційну пропозицію в Telegram", use_container_width=True):
+            # Важливо: скидаємо покажчик перед читанням
+            kp_info['data'].seek(0)
+            send_to_telegram(kp_info['data'], kp_info['name'])
