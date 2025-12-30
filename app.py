@@ -149,7 +149,7 @@ def fill_document_table(tbl, items, tax_label, tax_rate):
         if col_count >= 4:
             row_h[0].merge(row_h[col_count-1])
         
-        set_cell_style(row_h[0], section, WD_ALIGN_PARAGRAPH.CENTER, True)
+        set_cell_style(row_h[0], section, WD_ALIGN_PARAGRAPH.CENTER, False)
         
         # Товари
         for it in sec_items:
