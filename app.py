@@ -63,52 +63,49 @@ def replace_headers_styled(doc, reps):
         "Адреса:", "Виконавець:", "Контактний телефон:", 
         "Відповідальний:", "E-mail:"
     ]
-    
+        
+    # 1. Обробка звичайних параграфів
     for p in doc.paragraphs:
-        # КРОК 1: Спочатку замінюємо всі теги на значення
-        # Ми робимо це ДО форматування, щоб отримати готовий текст
+        # Спочатку заміна тегів
         for key, val in reps.items():
             if f"{{{{{key}}}}}" in p.text:
-                # Використовуємо .replace для рядка, це збереже текст, але скине стиль runs
-                # Це нормально, бо ми зараз його переробимо нижче
                 p.text = p.text.replace(f"{{{{{key}}}}}", str(val))
         
-        # КРОК 2: Шукаємо ключові слова і накладаємо жирний шрифт
+        # Потім жирний шрифт
         for label in bold_labels:
             if label in p.text:
-                # Зберігаємо повний текст, який вже містить дані (наприклад, "Замовник: ОСББ")
                 full_text = p.text
-                
-                # Очищуємо параграф від старого форматування
                 p.clear()
-                
-                # Розбиваємо текст на дві частини: До і Після лейблу
-                # label - це, наприклад, "Замовник:"
-                # parts[1] - це все, що йде після двокрапки
                 parts = full_text.split(label, 1)
-                
-                # Додаємо сам лейбл (ЖИРНИМ)
                 run_label = p.add_run(label)
                 run_label.bold = True
-                
-                # Додаємо текст після лейблу (ЗВИЧАЙНИМ)
                 if len(parts) > 1:
-                    # parts[1] містить пробіл і значення, наприклад " ОСББ"
                     run_value = p.add_run(parts[1])
                     run_value.bold = False
-                
-                # Перериваємо цикл по лейблах для цього параграфа, 
-                # щоб не обробляти один рядок двічі
                 break
 
-    # Заміна в таблицях (без форматування жирним)
+    # 2. Виправлена обробка ТАБЛИЦЬ (те, що у вас в кінці)
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
                 for p in cell.paragraphs:
+                    # Крок А: Заміна тегів (тепер вірно використовуємо reps)
                     for key, val in reps.items():
                         if f"{{{{{key}}}}}" in p.text:
                             p.text = p.text.replace(f"{{{{{key}}}}}", str(val))
+                    
+                    # Крок Б: Жирне форматування для таблиці
+                    for label in bold_labels:
+                        if label in p.text:
+                            full_text = p.text
+                            p.clear()
+                            parts = full_text.split(label, 1)
+                            run_label = p.add_run(label)
+                            run_label.bold = True
+                            if len(parts) > 1:
+                                run_value = p.add_run(parts[1])
+                                run_value.bold = False
+                            break
 
 def fill_document_table(tbl, items, tax_label, tax_rate):
     """
