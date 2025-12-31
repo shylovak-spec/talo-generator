@@ -301,7 +301,7 @@ for i, cat in enumerate(EQUIPMENT_BASE.keys()):
                 key = f"{cat}_{name}"
                 base_price = int(EQUIPMENT_BASE[cat][name])
                 
-                col_n, col_q, col_p, col_s = st.columns([3, 1, 1.2, 1])
+                col_n, col_q, col_p, col_s = st.columns([3, 0.5, 1.2, 1])
                 col_n.markdown(f"<div style='padding-top: 5px;'>{name}</div>", unsafe_allow_html=True)
                 
                 edit_qty = col_q.number_input("К-сть", 1, 100, 1, key=f"q_in_{key}", label_visibility="collapsed")
