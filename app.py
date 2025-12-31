@@ -331,7 +331,7 @@ if all_items:
             replace_headers_styled(doc_p, reps_p)
             fill_document_table(doc_p.tables[0], hw, v['tax_label'], v['tax_rate'])
             buf = BytesIO(); doc_p.save(buf); buf.seek(0)
-            files_results["p"] = {"name": f"Spec_Postavka_{kp_num}.docx", "data": buf}
+            files_results["p"] = {"name": f"Специфікація_обладнання_{kp_num}.docx", "data": buf}
 
         # 3. Роботи
         wrk = [i for i in all_items if "роботи" in i["cat"].lower()]
@@ -345,7 +345,7 @@ if all_items:
             replace_headers_styled(doc_w, reps_w)
             fill_document_table(doc_w.tables[0], wrk, v['tax_label'], v['tax_rate'])
             buf = BytesIO(); doc_w.save(buf); buf.seek(0)
-            files_results["w"] = {"name": f"Spec_Roboti_{kp_num}.docx", "data": buf}
+            files_results["w"] = {"name": f"Специфікація_робіт_{kp_num}.docx", "data": buf}
 
         st.session_state.generated_files = files_results
         st.rerun()
