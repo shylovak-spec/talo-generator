@@ -298,25 +298,35 @@ for i, cat in enumerate(EQUIPMENT_BASE.keys()):
                 del st.session_state.selected_items[key]
         if selected_names:
             for name in selected_names:
-        key = f"{cat}_{name}"
-        base_price = int(EQUIPMENT_BASE[cat][name])
+                # Важливо: все, що нижче, має бути зміщено праворуч (відступ 1 Tab або 4 пробіли)
+                key = f"{cat}_{name}"
                 
-                col_n, col_q, col_warn, col_p, col_s = st.columns([5, 1, 0.3, 1.5, 1.2])
+                # Отримуємо ціну з бази (яку ми завантажили з Google Sheets)
+                base_price = int(EQUIPMENT_BASE.get(cat, {}).get(name, 0))
+                
+                # Створюємо 5 колонок для ідеального вирівнювання в один рядок
+                # [Назва, К-сть, !!, Ціна, Сума]
+                col_n, col_q, col_warn, col_p, col_s = st.columns([4.5, 0.8, 0.4, 1.5, 1.2])
+                
+                # 1. Назва (додаємо відступ зверху 10px, щоб текст був на рівні з полями)
                 col_n.markdown(f"<div style='padding-top: 10px;'>{name}</div>", unsafe_allow_html=True)
                 
+                # 2. Кількість (максимально вузька колонка)
                 edit_qty = col_q.number_input("К-сть", 1, 100, 1, key=f"q_in_{key}", label_visibility="collapsed")
                 
-                # ЛОГІКА ПІДСВІТКИ: якщо в базі 0, виводимо червоне попередження
+                # 3. Знак оклику (якщо ціна 0)
                 if base_price == 0:
-            col_warn.markdown("<div style='padding-top: 10px; color: red; font-weight: bold;'>!!</div>", unsafe_allow_html=True)
-        else:
-            col_warn.write("") # Пуста колонка, якщо ціна є
+                    col_warn.markdown("<div style='padding-top: 10px; color: red; font-weight: bold;'>!!</div>", unsafe_allow_html=True)
                 
+                # 4. Ціна
                 edit_price = col_p.number_input("Ціна", 0, 1000000, base_price, key=f"p_in_{key}", label_visibility="collapsed")
+                
+                # 5. Підсумкова сума за позицію
                 current_sum = edit_qty * edit_price
-        col_s.markdown(f"<div style='padding-top: 10px; font-weight: bold; text-align: right;'>{format_num(current_sum)} грн</div>", unsafe_allow_html=True)
-        
-        st.session_state.selected_items[key] = {
+                col_s.markdown(f"<div style='padding-top: 10px; font-weight: bold; text-align: right;'>{format_num(current_sum)} грн</div>", unsafe_allow_html=True)
+                
+                # Зберігаємо дані в сесію для подальшої генерації документів
+                st.session_state.selected_items[key] = {
                     "name": name, 
                     "qty": edit_qty, 
                     "p": edit_price, 
