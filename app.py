@@ -286,6 +286,8 @@ if all_items:
 
     if st.button("🚀 ЗГЕНЕРУВАТИ ВСІ ДОКУМЕНТИ", type="primary", use_container_width=True):
         safe_addr = re.sub(r'[\\/*?:"<>|]', "", address).replace(" ", "_")
+        
+        # 1. СТВОРЮЄМО base_reps (Це важливо!)
         base_reps = {
             "vendor_name": v["full"], "vendor_address": v["adr"], "vendor_inn": v["inn"],
             "vendor_iban": v["iban"], "vendor_email": email, "vendor_short_name": v["short"],
@@ -297,9 +299,14 @@ if all_items:
             "tax_label": v['tax_label'], "tax_amount_val": format_num(tax_amount)
         }
         
-        # ЗАПИС В РЕЄСТР
+        # 2. ЗАПИС В РЕЄСТР (Ваш новий шматок)
         log_row = [date_str, kp_num, customer, address, vendor_choice, total_with_tax, manager]
-        save_to_google_sheets(log_row)
+        with st.spinner("Записую дані в реєстр..."):
+            success = save_to_google_sheets(log_row)
+            if success:
+                st.toast("✅ Дані додано в Google Sheets!")
+            else:
+                st.error("❌ Не вдалося записати в таблицю. Перевірте формат ключа в Secrets!")
 
         files_results = {}
         # 1. КП
