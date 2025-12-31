@@ -12,7 +12,40 @@ import datetime
 import re
 import os
 import math
-from database import EQUIPMENT_BASE
+def load_full_database_from_gsheets():
+    """Зчитує всі вкладки з таблиці База_Товарів і формує EQUIPMENT_BASE"""
+    try:
+        credentials_info = st.secrets["gcp_service_account"]
+        scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+        creds = Credentials.from_service_account_info(credentials_info, scopes=scope)
+        gc = gspread.authorize(creds)
+        
+        sh = gc.open("База_Товарів")
+        all_sheets = sh.worksheets()
+        
+        full_base = {}
+        for sheet in all_sheets:
+            category_name = sheet.title
+            data = sheet.get_all_records()
+            items_in_cat = {}
+            for row in data:
+                name = str(row.get('Назва', '')).strip()
+                price_raw = str(row.get('Ціна', 0)).replace(" ", "").replace(",", ".")
+                try:
+                    price = int(float(price_raw)) if price_raw else 0
+                except:
+                    price = 0
+                if name:
+                    items_in_cat[name] = price
+            if items_in_cat:
+                full_base[category_name] = items_in_cat
+        return full_base
+    except Exception as e:
+        st.error(f"⚠️ Помилка завантаження бази: {e}")
+        return {}
+
+# Завантажуємо актуальну базу
+EQUIPMENT_BASE = load_full_database_from_gsheets()
 
 try:
     from num2words import num2words
@@ -267,10 +300,24 @@ for i, cat in enumerate(EQUIPMENT_BASE.keys()):
             for name in selected_names:
                 key = f"{cat}_{name}"
                 base_price = int(EQUIPMENT_BASE[cat][name])
+                
                 col_n, col_q, col_p, col_s = st.columns([3, 1, 1.2, 1])
                 col_n.markdown(f"<div style='padding-top: 5px;'>{name}</div>", unsafe_allow_html=True)
+                
                 edit_qty = col_q.number_input("К-сть", 1, 100, 1, key=f"q_in_{key}", label_visibility="collapsed")
-                edit_price = col_p.number_input("Ціна", 0, 1000000, base_price, key=f"p_in_{key}", label_visibility="collapsed")
+                
+                # ЛОГІКА ПІДСВІТКИ: якщо в базі 0, виводимо червоне попередження
+                if base_price == 0:
+                    col_p.markdown("<span style='color:red; font-size:10px; font-weight:bold;'>⚠️</span>", unsafe_allow_html=True)
+                
+                edit_price = col_p.number_input(
+                    "Ціна за од.", 
+                    0, 1000000, 
+                    base_price, 
+                    key=f"p_in_{key}", 
+                    label_visibility="collapsed"
+                )
+                
                 current_sum = edit_qty * edit_price
                 col_s.markdown(f"**{format_num(current_sum)}** грн")
                 st.session_state.selected_items[key] = {"name": name, "qty": edit_qty, "p": edit_price, "sum": current_sum, "cat": cat}
