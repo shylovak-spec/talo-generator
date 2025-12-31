@@ -298,29 +298,25 @@ for i, cat in enumerate(EQUIPMENT_BASE.keys()):
                 del st.session_state.selected_items[key]
         if selected_names:
             for name in selected_names:
-                key = f"{cat}_{name}"
-                base_price = int(EQUIPMENT_BASE[cat][name])
+        key = f"{cat}_{name}"
+        base_price = int(EQUIPMENT_BASE[cat][name])
                 
-                col_n, col_q, col_p, col_s = st.columns([3, 0.5, 1.2, 1])
-                col_n.markdown(f"<div style='padding-top: 5px;'>{name}</div>", unsafe_allow_html=True)
+                col_n, col_q, col_warn, col_p, col_s = st.columns([5, 1, 0.3, 1.5, 1.2])
+                col_n.markdown(f"<div style='padding-top: 10px;'>{name}</div>", unsafe_allow_html=True)
                 
                 edit_qty = col_q.number_input("К-сть", 1, 100, 1, key=f"q_in_{key}", label_visibility="collapsed")
                 
                 # ЛОГІКА ПІДСВІТКИ: якщо в базі 0, виводимо червоне попередження
                 if base_price == 0:
-                    col_p.markdown("<span style='color:red; font-size:10px; font-weight:bold;'>!</span>", unsafe_allow_html=True)
+            col_warn.markdown("<div style='padding-top: 10px; color: red; font-weight: bold;'>!!</div>", unsafe_allow_html=True)
+        else:
+            col_warn.write("") # Пуста колонка, якщо ціна є
                 
-                edit_price = col_p.number_input(
-                    "Ціна за од.", 
-                    0, 1000000, 
-                    base_price, 
-                    key=f"p_in_{key}", 
-                    label_visibility="collapsed"
-                )
-                
+                edit_price = col_p.number_input("Ціна", 0, 1000000, base_price, key=f"p_in_{key}", label_visibility="collapsed")
                 current_sum = edit_qty * edit_price
-                col_s.markdown(f"**{format_num(current_sum)}** грн")
-                st.session_state.selected_items[key] = {"name": name, "qty": edit_qty, "p": edit_price, "sum": current_sum, "cat": cat}
+        col_s.markdown(f"<div style='padding-top: 10px; font-weight: bold; text-align: right;'>{format_num(current_sum)} грн</div>", unsafe_allow_html=True)
+        
+        st.session_state.selected_items[key] = {"name": name, "qty": edit_qty, "p": edit_price, "sum": current_sum, "cat": cat}
 
 all_items = list(st.session_state.selected_items.values())
 
