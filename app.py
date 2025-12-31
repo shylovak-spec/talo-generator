@@ -308,7 +308,7 @@ for i, cat in enumerate(EQUIPMENT_BASE.keys()):
                 
                 # ЛОГІКА ПІДСВІТКИ: якщо в базі 0, виводимо червоне попередження
                 if base_price == 0:
-                    col_p.markdown("<span style='color:red; font-size:10px; font-weight:bold;'>⚠️</span>", unsafe_allow_html=True)
+                    col_p.markdown("<span style='color:red; font-size:10px; font-weight:bold;'>!!</span>", unsafe_allow_html=True)
                 
                 edit_price = col_p.number_input(
                     "Ціна за од.", 
