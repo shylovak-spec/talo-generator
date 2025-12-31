@@ -298,13 +298,8 @@ if all_items:
         }
         
         # ЗАПИС В РЕЄСТР
-log_row = [date_str, kp_num, customer, address, vendor_choice, total_with_tax, manager]
-with st.spinner("Записую дані в реєстр..."):
-    success = save_to_google_sheets(log_row)
-    if success:
-        st.toast("✅ Дані додано в Google Sheets!")
-    else:
-        st.error("❌ Не вдалося записати в таблицю. Перевірте логи!")
+        log_row = [date_str, kp_num, customer, address, vendor_choice, total_with_tax, manager]
+        save_to_google_sheets(log_row)
 
         files_results = {}
         # 1. КП
