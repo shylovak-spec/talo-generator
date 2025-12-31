@@ -316,7 +316,13 @@ for i, cat in enumerate(EQUIPMENT_BASE.keys()):
                 current_sum = edit_qty * edit_price
         col_s.markdown(f"<div style='padding-top: 10px; font-weight: bold; text-align: right;'>{format_num(current_sum)} грн</div>", unsafe_allow_html=True)
         
-        st.session_state.selected_items[key] = {"name": name, "qty": edit_qty, "p": edit_price, "sum": current_sum, "cat": cat}
+        st.session_state.selected_items[key] = {
+                    "name": name, 
+                    "qty": edit_qty, 
+                    "p": edit_price, 
+                    "sum": current_sum, 
+                    "cat": cat
+                }
 
 all_items = list(st.session_state.selected_items.values())
 
