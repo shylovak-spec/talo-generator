@@ -197,21 +197,38 @@ def fill_document_table(tbl, items, tax_label, tax_rate):
     return total_val
 
 def send_to_telegram(file_data, file_name):
-    """Відправка файлу керівнику в Telegram"""
+    """Відправка файлу всім отримувачам зі списку в Secrets"""
     try:
         token = st.secrets["telegram_bot_token"]
-        chat_id = st.secrets["telegram_chat_id"]
+        # Отримуємо список ID. Якщо в Secrets це рядок або список, перетворюємо на список
+        chat_ids = st.secrets["telegram_chat_id"]
+        if isinstance(chat_ids, str):
+            chat_ids = [chat_ids]
+            
         url = f"https://api.telegram.org/bot{token}/sendDocument"
         
-        # Підготовка файлу
-        files = {'document': (file_name, file_data)}
-        data = {'chat_id': chat_id, 'caption': f"🚀 Нова комерційна пропозиція!\n📄 Файл: {file_name}"}
-        
-        response = requests.post(url, data=data, files=files)
-        if response.status_code == 200:
-            st.success("✅ КП успішно надіслано керівнику в Telegram!")
-        else:
-            st.error(f"❌ Помилка Telegram: {response.text}")
+        success_count = 0
+        for chat_id in chat_ids:
+            # Скидаємо покажчик файлу в початок для кожного отримувача
+            file_data.seek(0)
+            
+            files = {'document': (file_name, file_data)}
+            data = {
+                'chat_id': chat_id, 
+                'caption': f"🚀 Нова комерційна пропозиція!\n📄 Файл: {file_name}"
+            }
+            
+            response = requests.post(url, data=data, files=files)
+            if response.status_code == 200:
+                success_count += 1
+            else:
+                st.error(f"❌ Помилка для ID {chat_id}: {response.text}")
+
+        if success_count == len(chat_ids):
+            st.success(f"✅ КП успішно надіслано обом отримувачам ({success_count})!")
+        elif success_count > 0:
+            st.warning(f"⚠️ Надіслано лише {success_count} з {len(chat_ids)} отримувачів.")
+            
     except Exception as e:
         st.error(f"❌ Не вдалося відправити файл: {e}")
 
