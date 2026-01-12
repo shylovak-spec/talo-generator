@@ -102,17 +102,21 @@ def send_telegram_file(file_bytes, file_name):
     except: pass
 
 # ==============================================================================
-# 3. ФОРМАТУВАННЯ
+# 3. ФОРМАТУВАННЯ ТА ШРИФТИ
 # ==============================================================================
 
 def set_cell_style(cell, text, align=WD_ALIGN_PARAGRAPH.LEFT, bold=False):
+    """Примусове встановлення Times New Roman 11pt"""
     cell.text = ""
     p = cell.paragraphs[0]; p.alignment = align
     run = p.add_run(str(text))
     run.bold = bold
     run.font.name = 'Times New Roman'
     run.font.size = Pt(11)
+    # Пряма вказівка для кириличних символів
     run._element.rPr.rFonts.set(qn('w:eastAsia'), 'Times New Roman')
+    run._element.rPr.rFonts.set(qn('w:hAnsi'), 'Times New Roman')
+    run._element.rPr.rFonts.set(qn('w:ascii'), 'Times New Roman')
 
 def fill_document_table(doc, items, tax_label, tax_rate, is_fop):
     target_table = None
@@ -211,12 +215,13 @@ if EQUIPMENT_BASE:
             for name in sel:
                 key = f"{cat}_{name}"
                 bp = EQUIPMENT_BASE[cat][name]
-                # ТУТ ПОВЕРНУВ 6% ДЛЯ ФОП
+                # ЛОГІКА ФОП: МНОЖЕННЯ ЦІНИ НА 1.06
                 dp = precise_round(bp * 1.06) if is_fop else precise_round(bp)
                 cn, cq, cp, cs = st.columns([4, 1, 1.5, 1.5])
                 cn.write(name)
                 q = cq.number_input("К-сть", 1, 500, 1, key=f"q_{key}")
                 p = cp.number_input("Ціна за од.", 0.0, 1000000.0, dp, key=f"p_{key}")
+                # СУМА РЯДКА (ЦІНА * 1.06) * КІЛЬКІСТЬ
                 st.session_state.selected_items[key] = {"name": name, "qty": q, "p": p, "sum": precise_round(p*q), "cat": cat}
 
 active_keys = [f"{cat}_{n}" for cat in EQUIPMENT_BASE for n in st.session_state.get(f"ms_{cat}", [])]
@@ -229,7 +234,6 @@ if items:
     
     col_gen, col_tg = st.columns(2)
     
-    # КНОПКА 1: ПРОСТО ГЕНЕРУВАТИ WORD
     if col_gen.button("📄 1. ЗГЕНЕРУВАТИ ДОКУМЕНТИ", use_container_width=True):
         reps = {"vendor_name": v["full"], "vendor_address": v["adr"], "vendor_inn": v["inn"], "vendor_iban": v["iban"], 
                 "vendor_bank": v["bank"], "vendor_email": email, "vendor_short_name": v["short"], "customer": customer, 
@@ -237,7 +241,6 @@ if items:
                 "txt_intro": txt_intro, "line1": l1, "line2": l2, "line3": l3, "spec_id_postavka": kp_num, "spec_id_roboti": kp_num,
                 "total_sum_digits": format_num(total), "total_sum_words": amount_to_text_uk(total)}
         
-        # Реєстр
         try:
             creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"])
             gspread.authorize(creds).open("Реєстр КП Talo").get_worksheet(0).append_row([date_str, kp_num, customer, address, vendor_choice, total, manager])
@@ -250,6 +253,11 @@ if items:
         for label, t_file in file_map.items():
             if os.path.exists(t_file):
                 doc = Document(t_file)
+                # Оновлення шрифтів для всього тексту шаблону
+                for p in doc.paragraphs:
+                    for run in p.runs:
+                        run.font.name = 'Times New Roman'
+                
                 for item in list(doc.paragraphs) + [cell for tbl in doc.tables for row in tbl.rows for cell in row.cells]:
                     for k, val in reps.items():
                         if f"{{{{{k}}}}}" in item.text: item.text = item.text.replace(f"{{{{{k}}}}}", str(val))
@@ -266,7 +274,6 @@ if items:
         st.session_state.generated_files = results
         st.rerun()
 
-    # КНОПКА 2: ВІДПРАВИТИ В TELEGRAM (PDF)
     if col_tg.button("✈️ 2. ВІДПРАВИТИ В TELEGRAM (PDF)", use_container_width=True, type="primary"):
         if st.session_state.generated_files:
             for k, info in st.session_state.generated_files.items():
