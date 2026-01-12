@@ -21,34 +21,30 @@ except ImportError:
     num2words = None
 
 # ==============================================================================
-# 1. ТЕХНІЧНІ НАЛАШТУВАННЯ ТА БЕЗПЕЧНЕ ЗАВАНТАЖЕННЯ БАЗИ
+# 1. ТЕХНІЧНІ ФУНКЦІЇ ТА БЕЗПЕЧНЕ ЗАВАНТАЖЕННЯ БАЗИ
 # ==============================================================================
 
 def precise_round(number):
     return float(Decimal(str(number)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
 def format_num(n):
-    """Форматування чисел: 10 000,00"""
     return f"{precise_round(n):,.2f}".replace(",", " ").replace(".", ",")
 
 def amount_to_text_uk(amount):
-    """Перетворює суму в текст прописом (Українською)"""
+    """Сума прописом"""
     val = precise_round(amount)
     if num2words is None:
         return f"{format_num(val)} грн."
     try:
-        integer_part = int(val)
-        # Генерація тексту прописом
-        words = num2words(integer_part, lang='uk').capitalize()
+        words = num2words(int(val), lang='uk').capitalize()
         return f"{words} гривень 00 копійок"
-    except Exception:
+    except:
         return f"{format_num(val)} грн."
 
 @st.cache_data(ttl=3600)
 def load_full_database_from_gsheets():
     try:
-        if "gcp_service_account" not in st.secrets:
-            return {}
+        if "gcp_service_account" not in st.secrets: return {}
         creds = Credentials.from_service_account_info(
             st.secrets["gcp_service_account"], 
             scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
@@ -65,18 +61,14 @@ def load_full_database_from_gsheets():
                 price_raw = str(row.get('Ціна', '0')).replace(" ", "").replace(",", ".")
                 try:
                     price = float(price_raw) if (price_raw and price_raw.strip() != "") else 0.0
-                except ValueError:
+                except:
                     price = 0.0
-                if name:
-                    items_in_cat[name] = price
-            if items_in_cat:
-                full_base[category_name] = items_in_cat
+                if name: items_in_cat[name] = price
+            if items_in_cat: full_base[category_name] = items_in_cat
         return full_base
     except Exception as e:
         st.sidebar.error(f"⚠️ Помилка бази: {e}")
         return {}
-
-EQUIPMENT_BASE = load_full_database_from_gsheets()
 
 VENDORS = {
     "ТОВ «ТАЛО»": {"full": "ТОВ «ТАЛО»", "short": "Олексій КРАМАРЕНКО", "inn": "32670939", "adr": "03113, м. Київ, проспект Перемоги, будинок 68/1 офіс 62", "iban": "UA_________________________", "bank": "АТ «УКРСИББАНК»", "tax_label": "ПДВ (20%)", "tax_rate": 0.20},
@@ -91,37 +83,31 @@ VENDORS = {
 def docx_to_pdf_libreoffice(docx_bytes):
     with tempfile.TemporaryDirectory() as tmp_dir:
         input_path = os.path.join(tmp_dir, "temp.docx")
-        with open(input_path, "wb") as f:
-            f.write(docx_bytes)
+        with open(input_path, "wb") as f: f.write(docx_bytes)
         try:
             subprocess.run(['lowriter', '--headless', '--convert-to', 'pdf', '--outdir', tmp_dir, input_path], check=True)
             pdf_path = os.path.join(tmp_dir, "temp.pdf")
-            with open(pdf_path, "rb") as f:
-                return f.read()
-        except Exception:
-            return None
+            with open(pdf_path, "rb") as f: return f.read()
+        except: return None
 
 def send_telegram_file(file_bytes, file_name):
     token = st.secrets.get("telegram_bot_token")
     chat_id = st.secrets.get("telegram_chat_id")
-    if not token or not chat_id:
-        return
+    if not token or not chat_id: return
     url = f"https://api.telegram.org/bot{token}/sendDocument"
     try:
         files = {'document': (file_name, file_bytes)}
         requests.post(url, files=files, data={'chat_id': chat_id})
-        st.toast(f"✅ Відправлено в Telegram: {file_name}")
-    except Exception:
-        pass
+        st.toast(f"✅ Відправлено: {file_name}")
+    except: pass
 
 # ==============================================================================
-# 3. ФОРМАТУВАННЯ ТАБЛИЦЬ ТА ШРИФТІВ
+# 3. ФОРМАТУВАННЯ
 # ==============================================================================
 
 def set_cell_style(cell, text, align=WD_ALIGN_PARAGRAPH.LEFT, bold=False):
     cell.text = ""
-    p = cell.paragraphs[0]
-    p.alignment = align
+    p = cell.paragraphs[0]; p.alignment = align
     run = p.add_run(str(text))
     run.bold = bold
     run.font.name = 'Times New Roman'
@@ -134,8 +120,7 @@ def fill_document_table(doc, items, tax_label, tax_rate, is_fop):
         if any("Найменування" in cell.text for cell in tbl.rows[0].cells):
             target_table = tbl
             break
-    if not target_table:
-        return
+    if not target_table: return
 
     def get_cat(c):
         c = c.lower()
@@ -167,30 +152,26 @@ def fill_document_table(doc, items, tax_label, tax_rate, is_fop):
 
     if is_fop:
         f_row = target_table.add_row()
-        f_row.allow_break_across_pages = False
         f_row.cells[0].merge(f_row.cells[cols-2])
         set_cell_style(f_row.cells[0], "ЗАГАЛЬНА СУМА, грн:", WD_ALIGN_PARAGRAPH.LEFT, True)
         set_cell_style(f_row.cells[cols-1], format_num(grand_total), WD_ALIGN_PARAGRAPH.RIGHT, True)
     else:
         pure = precise_round(grand_total / (1 + tax_rate))
-        f_rows = [
-            ("РАЗОМ (без ПДВ), грн:", pure, False),
-            (f"{tax_label}:", grand_total - pure, False),
-            ("ЗАГАЛЬНА СУМА, грн:", grand_total, True)
-        ]
+        f_rows = [("РАЗОМ (без ПДВ), грн:", pure, False), (f"{tax_label}:", grand_total-pure, False), ("ЗАГАЛЬНА СУМА, грн:", grand_total, True)]
         for label, val, is_bold in f_rows:
             r = target_table.add_row()
-            r.allow_break_across_pages = False
             r.cells[0].merge(r.cells[cols-2])
             set_cell_style(r.cells[0], label, WD_ALIGN_PARAGRAPH.LEFT, is_bold)
             set_cell_style(r.cells[cols-1], format_num(val), WD_ALIGN_PARAGRAPH.RIGHT, is_bold)
 
 # ==============================================================================
-# 4. ІНТЕРФЕЙС STREAMLIT
+# 4. ІНТЕРФЕЙС
 # ==============================================================================
 
 st.set_page_config(page_title="Talo Generator", layout="wide")
 st.title("⚡ Генератор КП")
+
+EQUIPMENT_BASE = load_full_database_from_gsheets()
 
 with st.sidebar:
     st.header("⚙️ Керування")
@@ -230,7 +211,8 @@ if EQUIPMENT_BASE:
             for name in sel:
                 key = f"{cat}_{name}"
                 bp = EQUIPMENT_BASE[cat][name]
-                dp = precise_round(bp * 1.06) if is_fop else bp
+                # ТУТ ПОВЕРНУВ 6% ДЛЯ ФОП
+                dp = precise_round(bp * 1.06) if is_fop else precise_round(bp)
                 cn, cq, cp, cs = st.columns([4, 1, 1.5, 1.5])
                 cn.write(name)
                 q = cq.number_input("К-сть", 1, 500, 1, key=f"q_{key}")
@@ -243,23 +225,23 @@ items = list(st.session_state.selected_items.values())
 
 if items:
     total = sum(i['sum'] for i in items)
-    if st.button("🚀 ЗГЕНЕРУВАТИ ТА ВІДПРАВИТИ", type="primary", use_container_width=True):
-        reps = {
-            "vendor_name": v["full"], "vendor_address": v["adr"], "vendor_inn": v["inn"], 
-            "vendor_iban": v["iban"], "vendor_bank": v["bank"], "vendor_email": email, 
-            "vendor_short_name": v["short"], "customer": customer, "address": address, 
-            "kp_num": kp_num, "date": date_str, "manager": manager, "phone": phone, "email": email,
-            "txt_intro": txt_intro, "line1": l1, "line2": l2, "line3": l3, 
-            "spec_id_postavka": kp_num, "spec_id_roboti": kp_num,
-            "total_sum_digits": format_num(total), 
-            "total_sum_words": amount_to_text_uk(total)
-        }
+    st.info(f"💰 Загальна сума: {format_num(total)} грн")
+    
+    col_gen, col_tg = st.columns(2)
+    
+    # КНОПКА 1: ПРОСТО ГЕНЕРУВАТИ WORD
+    if col_gen.button("📄 1. ЗГЕНЕРУВАТИ ДОКУМЕНТИ", use_container_width=True):
+        reps = {"vendor_name": v["full"], "vendor_address": v["adr"], "vendor_inn": v["inn"], "vendor_iban": v["iban"], 
+                "vendor_bank": v["bank"], "vendor_email": email, "vendor_short_name": v["short"], "customer": customer, 
+                "address": address, "kp_num": kp_num, "date": date_str, "manager": manager, "phone": phone, "email": email,
+                "txt_intro": txt_intro, "line1": l1, "line2": l2, "line3": l3, "spec_id_postavka": kp_num, "spec_id_roboti": kp_num,
+                "total_sum_digits": format_num(total), "total_sum_words": amount_to_text_uk(total)}
         
         # Реєстр
         try:
-            creds_reg = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"])
-            gspread.authorize(creds_reg).open("Реєстр КП Talo").get_worksheet(0).append_row([date_str, kp_num, customer, address, vendor_choice, total, manager])
-        except Exception: pass
+            creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"])
+            gspread.authorize(creds).open("Реєстр КП Talo").get_worksheet(0).append_row([date_str, kp_num, customer, address, vendor_choice, total, manager])
+        except: pass
 
         results = {}
         file_map = {"КП": "template.docx", "Специфікація_ОБЛ": "template_postavka.docx", "Специфікація_РОБ": "template_roboti.docx"}
@@ -268,11 +250,9 @@ if items:
         for label, t_file in file_map.items():
             if os.path.exists(t_file):
                 doc = Document(t_file)
-                # Заміна тексту в параграфах і таблицях
                 for item in list(doc.paragraphs) + [cell for tbl in doc.tables for row in tbl.rows for cell in row.cells]:
                     for k, val in reps.items():
-                        if f"{{{{{k}}}}}" in item.text:
-                            item.text = item.text.replace(f"{{{{{k}}}}}", str(val))
+                        if f"{{{{{k}}}}}" in item.text: item.text = item.text.replace(f"{{{{{k}}}}}", str(val))
                 
                 it_fill = items
                 if "ОБЛ" in label: it_fill = [i for i in items if "роботи" not in i["cat"].lower()]
@@ -281,19 +261,23 @@ if items:
                 if it_fill:
                     fill_document_table(doc, it_fill, v['tax_label'], v['tax_rate'], is_fop)
                     buf = BytesIO(); doc.save(buf); buf.seek(0)
-                    docx_name = f"{label}_{kp_num}_{clean_addr}.docx"
-                    
-                    # Конвертація та Telegram
-                    pdf_data = docx_to_pdf_libreoffice(buf.getvalue())
-                    if pdf_data:
-                        send_telegram_file(pdf_data, docx_name.replace(".docx", ".pdf"))
-                    
-                    results[label] = {"name": docx_name, "data": buf}
+                    results[label] = {"name": f"{label}_{kp_num}_{clean_addr}.docx", "data": buf}
         
         st.session_state.generated_files = results
         st.rerun()
 
+    # КНОПКА 2: ВІДПРАВИТИ В TELEGRAM (PDF)
+    if col_tg.button("✈️ 2. ВІДПРАВИТИ В TELEGRAM (PDF)", use_container_width=True, type="primary"):
+        if st.session_state.generated_files:
+            for k, info in st.session_state.generated_files.items():
+                pdf_data = docx_to_pdf_libreoffice(info['data'].getvalue())
+                if pdf_data:
+                    send_telegram_file(pdf_data, info['name'].replace(".docx", ".pdf"))
+        else:
+            st.warning("Спочатку натисніть 'Згенерувати документи'")
+
 if st.session_state.generated_files:
+    st.write("---")
     cols = st.columns(len(st.session_state.generated_files))
     for i, (k, info) in enumerate(st.session_state.generated_files.items()):
         cols[i].download_button(f"💾 {info['name']}", info['data'], info['name'])
