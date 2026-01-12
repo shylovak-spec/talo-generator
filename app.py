@@ -4,6 +4,7 @@ from google.oauth2.service_account import Credentials
 from docx import Document
 from docx.shared import Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml.ns import qn
 from io import BytesIO
 import datetime
 import os
@@ -14,7 +15,7 @@ import tempfile
 from decimal import Decimal, ROUND_HALF_UP
 
 # ==============================================================================
-# 1. ТЕХНІЧНІ НАЛАШТУВАННЯ ТА БАЗА
+# 1. ТЕХНІЧНІ НАЛАШТУВАННЯ ТА БЕЗПЕЧНЕ ЗАВАНТАЖЕННЯ БАЗИ
 # ==============================================================================
 
 def precise_round(number):
@@ -22,6 +23,7 @@ def precise_round(number):
 
 @st.cache_data(ttl=3600)
 def load_full_database_from_gsheets():
+    """Завантаження бази з захистом від порожніх цінових клітинок"""
     try:
         if "gcp_service_account" not in st.secrets: return {}
         creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], 
@@ -32,9 +34,20 @@ def load_full_database_from_gsheets():
         for sheet in sh.worksheets():
             category_name = sheet.title
             data = sheet.get_all_records()
-            items = {str(r.get('Назва', '')).strip(): float(str(r.get('Ціна', 0)).replace(" ","").replace(",",".")) 
-                     for r in data if r.get('Назва')}
-            if items: full_base[category_name] = items
+            items_in_cat = {}
+            for row in data:
+                name = str(row.get('Назва', '')).strip()
+                # Очищення ціни від пробілів та заміна коми на крапку
+                price_raw = str(row.get('Ціна', '0')).replace(" ", "").replace(",", ".")
+                
+                # ЗАХИСТ ВІД ПОМИЛКИ 'could not convert string to float'
+                try:
+                    price = float(price_raw) if (price_raw and price_raw.strip() != "") else 0.0
+                except ValueError:
+                    price = 0.0
+                
+                if name: items_in_cat[name] = price
+            if items_in_cat: full_base[category_name] = items_in_cat
         return full_base
     except Exception as e:
         st.sidebar.error(f"⚠️ Помилка бази: {e}")
@@ -48,70 +61,46 @@ VENDORS = {
     "ФОП Шилова Ксенія Вікторівна": {"full": "ФОП Шилова Ксенія Вікторівна", "short": "Ксенія ШИЛОВА", "inn": "3237308989", "adr": "20901 м. Чигирин, вул. Миру 4, кв. 43", "iban": "UA433220010000026007350102344", "bank": "АТ УНІВЕРСАЛ БАНК", "tax_label": "6%", "tax_rate": 0.06}
 }
 
-try:
-    from num2words import num2words
-except:
-    num2words = None
+try: from num2words import num2words
+except: num2words = None
 
 # ==============================================================================
-# 2. ФУНКЦІЇ КОНВЕРТАЦІЇ ТА ТЕЛЕГРАМ
+# 2. PDF ТА ТЕЛЕГРАМ
 # ==============================================================================
 
 def docx_to_pdf_libreoffice(docx_bytes):
-    """Конвертація DOCX в PDF через LibreOffice в середовищі Streamlit Cloud"""
     with tempfile.TemporaryDirectory() as tmp_dir:
         input_path = os.path.join(tmp_dir, "temp.docx")
-        with open(input_path, "wb") as f:
-            f.write(docx_bytes)
+        with open(input_path, "wb") as f: f.write(docx_bytes)
         try:
             subprocess.run(['lowriter', '--headless', '--convert-to', 'pdf', '--outdir', tmp_dir, input_path], check=True)
             pdf_path = os.path.join(tmp_dir, "temp.pdf")
-            with open(pdf_path, "rb") as f:
-                return f.read()
-        except Exception as e:
-            st.error(f"Помилка конвертації PDF: {e}")
-            return None
+            with open(pdf_path, "rb") as f: return f.read()
+        except: return None
 
 def send_telegram_file(file_bytes, file_name):
-    """Відправка файлу в Telegram"""
     token = st.secrets.get("telegram_bot_token")
     chat_id = st.secrets.get("telegram_chat_id")
-    if not token or not chat_id:
-        st.error("Налаштуйте Telegram токени в Secrets!")
-        return
+    if not token or not chat_id: return
     url = f"https://api.telegram.org/bot{token}/sendDocument"
     try:
         files = {'document': (file_name, file_bytes)}
-        data = {'chat_id': chat_id}
-        requests.post(url, files=files, data=data)
-        st.toast(f"✅ Відправлено: {file_name}")
-    except Exception as e:
-        st.error(f"Помилка Telegram: {e}")
+        requests.post(url, files=files, data={'chat_id': chat_id})
+        st.toast(f"✅ Telegram: {file_name}")
+    except: pass
 
 # ==============================================================================
-# 3. ФОРМУВАННЯ ТАБЛИЦЬ
+# 3. ШРИФТИ ТА ТАБЛИЦІ
 # ==============================================================================
-
-def format_num(n):
-    return f"{precise_round(n):,.2f}".replace(",", " ").replace(".", ",")
-
-def amount_to_text_uk(amount):
-    val = precise_round(amount)
-    if num2words is None: return f"{format_num(val)} грн."
-    try:
-        words = num2words(int(val), lang='uk').capitalize()
-        return f"{words} гривень 00 копійок"
-    except: return f"{format_num(val)} грн."
 
 def set_cell_style(cell, text, align=WD_ALIGN_PARAGRAPH.LEFT, bold=False):
-    cell.text = "" # Очищуємо комірку від залишків форматування шаблону
-    p = cell.paragraphs[0]
-    p.alignment = align
+    cell.text = ""
+    p = cell.paragraphs[0]; p.alignment = align
     run = p.add_run(str(text))
-    run.bold = bold; 
-    run.font.name = 'Times New Roman'; 
-    run.font.size = Pt(12)
-    from docx.oxml.ns import qn
+    run.bold = bold
+    run.font.name = 'Times New Roman'
+    run.font.size = Pt(11)
+    # Захист кирилиці
     run._element.rPr.rFonts.set(qn('w:eastAsia'), 'Times New Roman')
 
 def fill_document_table(doc, items, tax_label, tax_rate, is_fop):
@@ -124,7 +113,7 @@ def fill_document_table(doc, items, tax_label, tax_rate, is_fop):
 
     def get_cat(c):
         c = c.lower()
-        if "роботи" in c or "послуги" in c: return "РОБОТИ"
+        if any(x in c for x in ["роботи", "послуги"]): return "РОБОТИ"
         if any(x in c for x in ["комплект", "щит", "кріплення", "матеріал", "кабель", "провід"]): return "МАТЕРІАЛИ"
         return "ОБЛАДНАННЯ"
 
@@ -147,22 +136,23 @@ def fill_document_table(doc, items, tax_label, tax_rate, is_fop):
             set_cell_style(cells[0], it['name'])
             if cols >= 4:
                 set_cell_style(cells[1], str(it['qty']), WD_ALIGN_PARAGRAPH.CENTER)
-                set_cell_style(cells[2], format_num(it['p']), WD_ALIGN_PARAGRAPH.RIGHT)
-                set_cell_style(cells[3], format_num(it['sum']), WD_ALIGN_PARAGRAPH.RIGHT)
+                set_cell_style(cells[2], f"{it['p']:,.2f}".replace(",", " ").replace(".", ","), WD_ALIGN_PARAGRAPH.RIGHT)
+                set_cell_style(cells[3], f"{it['sum']:,.2f}".replace(",", " ").replace(".", ","), WD_ALIGN_PARAGRAPH.RIGHT)
 
+    # Підсумки (ПДВ або один рядок для ФОП)
     if is_fop:
-        f_row = target_table.add_row()
+        f_row = target_table.add_row(); f_row.allow_break_across_pages = False
         f_row.cells[0].merge(f_row.cells[cols-2])
         set_cell_style(f_row.cells[0], "ЗАГАЛЬНА СУМА, грн:", WD_ALIGN_PARAGRAPH.LEFT, True)
-        set_cell_style(f_row.cells[cols-1], format_num(grand_total), WD_ALIGN_PARAGRAPH.RIGHT, True)
+        set_cell_style(f_row.cells[cols-1], f"{grand_total:,.2f}".replace(",", " ").replace(".", ","), WD_ALIGN_PARAGRAPH.RIGHT, True)
     else:
         pure = precise_round(grand_total / (1 + tax_rate))
-        f_data = [("РАЗОМ (без ПДВ), грн:", pure, False), (f"{tax_label}:", grand_total-pure, False), ("ЗАГАЛЬНА СУМА, грн:", grand_total, True)]
-        for label, val, is_bold in f_data:
-            r = target_table.add_row()
+        f_rows = [("РАЗОМ (без ПДВ), грн:", pure, False), (f"{tax_label}:", grand_total-pure, False), ("ЗАГАЛЬНА СУМА, грн:", grand_total, True)]
+        for label, val, is_bold in f_rows:
+            r = target_table.add_row(); r.allow_break_across_pages = False
             r.cells[0].merge(r.cells[cols-2])
             set_cell_style(r.cells[0], label, WD_ALIGN_PARAGRAPH.LEFT, is_bold)
-            set_cell_style(r.cells[cols-1], format_num(val), WD_ALIGN_PARAGRAPH.RIGHT, is_bold)
+            set_cell_style(r.cells[cols-1], f"{val:,.2f}".replace(",", " ").replace(".", ","), WD_ALIGN_PARAGRAPH.RIGHT, is_bold)
 
 # ==============================================================================
 # 4. ІНТЕРФЕЙС
@@ -222,14 +212,13 @@ items = list(st.session_state.selected_items.values())
 
 if items:
     total = sum(i['sum'] for i in items)
-    st.info(f"🚀 **ЗАГАЛЬНА СУМА: {format_num(total)} грн**")
-
     if st.button("🚀 ЗГЕНЕРУВАТИ ТА ВІДПРАВИТИ", type="primary", use_container_width=True):
         reps = {"vendor_name": v["full"], "vendor_address": v["adr"], "vendor_inn": v["inn"], "vendor_iban": v["iban"], 
                 "vendor_bank": v["bank"], "vendor_email": email, "vendor_short_name": v["short"], "customer": customer, 
                 "address": address, "kp_num": kp_num, "date": date_str, "manager": manager, "phone": phone, "email": email,
                 "txt_intro": txt_intro, "line1": l1, "line2": l2, "line3": l3, "spec_id_postavka": kp_num, "spec_id_roboti": kp_num,
-                "total_sum_digits": format_num(total), "total_sum_words": amount_to_text_uk(total)}
+                "total_sum_digits": f"{total:,.2f}".replace(",", " ").replace(".", ","), 
+                "total_sum_words": amount_to_text_uk(total)}
         
         # Реєстр
         try:
@@ -257,12 +246,8 @@ if items:
                     buf = BytesIO(); doc.save(buf); buf.seek(0)
                     docx_name = f"{label}_{kp_num}_{clean_addr}.docx"
                     
-                    # Конвертація в PDF
                     pdf_data = docx_to_pdf_libreoffice(buf.getvalue())
-                    if pdf_data:
-                        pdf_name = docx_name.replace(".docx", ".pdf")
-                        send_telegram_file(pdf_data, pdf_name) # ТЕЛЕГРАМ ТУТ
-                    
+                    if pdf_data: send_telegram_file(pdf_data, docx_name.replace(".docx", ".pdf"))
                     results[label] = {"name": docx_name, "data": buf}
         
         st.session_state.generated_files = results
