@@ -279,4 +279,21 @@ if items:
                 if "РОБ" in label: it_fill = [i for i in items if "роботи" in i["cat"].lower()]
                 
                 if it_fill:
-                    fill_document_table(doc, it_fill, v['
+                    fill_document_table(doc, it_fill, v['tax_label'], v['tax_rate'], is_fop)
+                    buf = BytesIO(); doc.save(buf); buf.seek(0)
+                    docx_name = f"{label}_{kp_num}_{clean_addr}.docx"
+                    
+                    # Конвертація та Telegram
+                    pdf_data = docx_to_pdf_libreoffice(buf.getvalue())
+                    if pdf_data:
+                        send_telegram_file(pdf_data, docx_name.replace(".docx", ".pdf"))
+                    
+                    results[label] = {"name": docx_name, "data": buf}
+        
+        st.session_state.generated_files = results
+        st.rerun()
+
+if st.session_state.generated_files:
+    cols = st.columns(len(st.session_state.generated_files))
+    for i, (k, info) in enumerate(st.session_state.generated_files.items()):
+        cols[i].download_button(f"💾 {info['name']}", info['data'], info['name'])
