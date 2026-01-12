@@ -1,8 +1,5 @@
 import streamlit as st
 import gspread
-import requests
-import subprocess
-import tempfile
 from google.oauth2.service_account import Credentials
 from docx import Document
 from docx.shared import Pt
@@ -89,11 +86,20 @@ def set_cell_style(cell, text, align=WD_ALIGN_PARAGRAPH.LEFT, bold=False):
     run = p.add_run(str(text))
     run.bold = bold; run.font.name = 'Times New Roman'; run.font.size = Pt(11)
 
-def fill_document_table(tbl, items, tax_label, tax_rate, is_fop):
+def fill_document_table(doc, items, tax_label, tax_rate, is_fop):
+    """Шукає правильну таблицю за словом 'Найменування' і заповнює її"""
+    target_table = None
+    for tbl in doc.tables:
+        if "Найменування" in tbl.cell(0, 0).text:
+            target_table = tbl
+            break
+    
+    if not target_table:
+        return # Якщо таблицю не знайдено, нічого не робимо, щоб не псувати файл
+
     def get_category_name(item_cat):
         c = item_cat.lower()
         if "роботи" in c or "послуги" in c: return "РОБОТИ"
-        # Комплектуючі тепер автоматично в МАТЕРІАЛИ
         if any(x in c for x in ["комплект", "щит", "кріплення", "матеріал", "кабель", "провід"]): 
             return "МАТЕРІАЛИ"
         return "ОБЛАДНАННЯ"
@@ -105,21 +111,44 @@ def fill_document_table(tbl, items, tax_label, tax_rate, is_fop):
         grouped[cat_key].append(it)
         grand_total += it['sum']
 
-    col_count = len(tbl.columns)
+    col_count = len(target_table.columns)
+    
     for section in ["ОБЛАДНАННЯ", "МАТЕРІАЛИ", "РОБОТИ"]:
         if not grouped[section]: continue
-        row_h = tbl.add_row().cells
+        
+        # Додаємо заголовок секції
+        new_row = target_table.add_row()
+        new_row.allow_break_across_pages = False
+        row_h = new_row.cells
         if col_count >= 4: row_h[0].merge(row_h[col_count-1])
         p = row_h[0].paragraphs[0]; p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         run = p.add_run(section); run.italic = True; run.font.name = 'Times New Roman'; run.font.size = Pt(12)
         
         for it in grouped[section]:
-            r = tbl.add_row().cells
+            r_row = target_table.add_row()
+            r_row.allow_break_across_pages = False
+            r = r_row.cells
             set_cell_style(r[0], it['name'])
             if col_count >= 4:
                 set_cell_style(r[1], str(it['qty']), WD_ALIGN_PARAGRAPH.CENTER)
                 set_cell_style(r[2], format_num(it['p']), WD_ALIGN_PARAGRAPH.RIGHT)
                 set_cell_style(r[3], format_num(it['sum']), WD_ALIGN_PARAGRAPH.RIGHT)
+
+    # Підсумок
+    if is_fop:
+        footer = [("ЗАГАЛЬНА СУМА, грн:", grand_total, True)]
+    else:
+        pure = precise_round(grand_total / (1 + tax_rate))
+        footer = [("РАЗОМ (без ПДВ), грн:", pure, False), (f"{tax_label}:", grand_total-pure, False), ("ЗАГАЛЬНА СУМА, грн:", grand_total, True)]
+
+    for label, val, is_bold in footer:
+        f_row = target_table.add_row()
+        f_row.allow_break_across_pages = False
+        row = f_row.cells
+        if col_count >= 4:
+            row[0].merge(row[2])
+            set_cell_style(row[0], label, WD_ALIGN_PARAGRAPH.LEFT, is_bold)
+            set_cell_style(row[3], format_num(val), WD_ALIGN_PARAGRAPH.RIGHT, is_bold)
 
     # ЛОГІКА ПІДСУМКУ (ТІЛЬКИ ЗАГАЛЬНА СУМА ДЛЯ ФОП)
     if is_fop:
