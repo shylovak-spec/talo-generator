@@ -163,6 +163,7 @@ def fill_document_table(tbl, items, tax_label, tax_rate, is_fop=False):
     return precise_round(grand_total)
 
 # ================== СЕРВІСНІ ФУНКЦІЇ ==================
+@st.cache_data(ttl=600)
 def load_full_database_from_gsheets():
     try:
         credentials_info = st.secrets["gcp_service_account"]
@@ -223,45 +224,72 @@ def convert_docx_to_pdf(docx_data):
 st.set_page_config(page_title="Talo Generator", layout="wide")
 EQUIPMENT_BASE = load_full_database_from_gsheets()
 
-if "generated_files" not in st.session_state: st.session_state.generated_files = None
-if "selected_items" not in st.session_state: st.session_state.selected_items = {}
+# ПЕРЕВІРКА: якщо база порожня (через помилку API), не малюємо вкладки
+if not EQUIPMENT_BASE:
+    st.error("❌ Не вдалося завантажити базу товарів через обмеження Google API. Будь ласка, зачекайте 1 хвилину та оновіть сторінку.")
+    st.stop() # Зупиняє виконання коду далі
+else:
+    # УСЕ, ЩО НИЖЧЕ, ТЕПЕР МАЄ ВІДСТУП (знаходиться всередині else)
+    if "generated_files" not in st.session_state: 
+        st.session_state.generated_files = None
+    if "selected_items" not in st.session_state: 
+        st.session_state.selected_items = {}
 
-st.title("⚡ Генератор КП Talo")
+    st.title("⚡ Генератор КП Talo")
 
-with st.expander("📌 Основна інформація", expanded=True):
-    col1, col2 = st.columns(2)
-    vendor_choice = col1.selectbox("Виконавець:", list(VENDORS.keys()))
-    # Логіка автоматично розпізнає будь-якого ФОП
-    is_fop_selected = "ФОП" in vendor_choice 
-    v = VENDORS[vendor_choice]
+    with st.expander("📌 Основна інформація", expanded=True):
+        col1, col2 = st.columns(2)
+        vendor_choice = col1.selectbox("Виконавець:", list(VENDORS.keys()))
+        
+        # Логіка автоматично розпізнає будь-якого ФОП
+        is_fop_selected = "ФОП" in vendor_choice 
+        v = VENDORS[vendor_choice]
+        
+        customer = col1.text_input("Замовник", "ОСББ")
+        address = col1.text_input("Адреса об'єкта")
+        kp_num = col2.text_input("Номер КП/Договору", "1223.25")
+        manager = col2.text_input("Відповідальний", "Олексій Крамаренко")
+        date_val = col2.date_input("Дата", datetime.date.today())
+        date_str = date_val.strftime("%d.%m.%Y")
+        phone = col2.text_input("Телефон", "+380 (67) 477-17-18")
+        email = col2.text_input("E-mail", "o.kramarenko@talo.com.ua")
+
+    st.subheader("📦 Специфікація")
     
-    customer = col1.text_input("Замовник", "ОСББ")
-    address = col1.text_input("Адреса об'єкта")
-    kp_num = col2.text_input("Номер КП/Договору", "1223.25")
-    manager = col2.text_input("Відповідальний", "Олексій Крамаренко")
-    date_val = col2.date_input("Дата", datetime.date.today())
-    date_str = date_val.strftime("%d.%m.%Y")
-    phone = col2.text_input("Телефон", "+380 (67) 477-17-18")
-    email = col2.text_input("E-mail", "o.kramarenko@talo.com.ua")
-
-st.subheader("📦 Специфікація")
-tabs = st.tabs(list(EQUIPMENT_BASE.keys()))
-for i, cat in enumerate(EQUIPMENT_BASE.keys()):
-    with tabs[i]:
-        selected_names = st.multiselect(f"Додати з {cat}:", list(EQUIPMENT_BASE[cat].keys()), key=f"ms_{cat}")
-        for name in selected_names:
-            key = f"{cat}_{name}"
-            b_price = float(EQUIPMENT_BASE.get(cat, {}).get(name, 0))
-            display_p = precise_round(b_price * 1.06) if is_fop_selected else precise_round(b_price)
-            
-            c_n, c_q, c_w, c_p, c_s = st.columns([4.5, 0.8, 0.4, 1.5, 1.2])
-            c_n.markdown(f"<div style='padding-top: 10px;'>{name}</div>", unsafe_allow_html=True)
-            qty = c_q.number_input("К-сть", 1, 500, 1, key=f"q_{key}", label_visibility="collapsed")
-            if b_price == 0: c_w.markdown("<div style='color:red;padding-top:10px;'>!!</div>", unsafe_allow_html=True)
-            p = c_p.number_input("Ціна", 0.0, 1000000.0, float(display_p), step=0.01, key=f"p_{key}", label_visibility="collapsed")
-            row_sum = precise_round(p * qty)
-            c_s.markdown(f"<div style='padding-top:10px;text-align:right;'><b>{format_num(row_sum)} грн</b></div>", unsafe_allow_html=True)
-            st.session_state.selected_items[key] = {"name": name, "qty": qty, "p": p, "sum": row_sum, "cat": cat}
+    # Створюємо вкладки тільки якщо EQUIPMENT_BASE не порожній
+    tabs = st.tabs(list(EQUIPMENT_BASE.keys()))
+    
+    for i, cat in enumerate(EQUIPMENT_BASE.keys()):
+        with tabs[i]:
+            selected_names = st.multiselect(f"Додати з {cat}:", list(EQUIPMENT_BASE[cat].keys()), key=f"ms_{cat}")
+            for name in selected_names:
+                key = f"{cat}_{name}"
+                b_price = float(EQUIPMENT_BASE.get(cat, {}).get(name, 0))
+                
+                # Націнка 6% для ФОП
+                display_p = precise_round(b_price * 1.06) if is_fop_selected else precise_round(b_price)
+                
+                c_n, c_q, c_w, c_p, c_s = st.columns([4.5, 0.8, 0.4, 1.5, 1.2])
+                c_n.markdown(f"<div style='padding-top: 10px;'>{name}</div>", unsafe_allow_html=True)
+                
+                qty = c_q.number_input("К-сть", 1, 500, 1, key=f"q_{key}", label_visibility="collapsed")
+                
+                if b_price == 0: 
+                    c_w.markdown("<div style='color:red;padding-top:10px;'>!!</div>", unsafe_allow_html=True)
+                
+                p = c_p.number_input("Ціна", 0.0, 1000000.0, float(display_p), step=0.01, key=f"p_{key}", label_visibility="collapsed")
+                
+                row_sum = precise_round(p * qty)
+                c_s.markdown(f"<div style='padding-top:10px;text-align:right;'><b>{format_num(row_sum)} грн</b></div>", unsafe_allow_html=True)
+                
+                # Зберігаємо вибране в сесію
+                st.session_state.selected_items[key] = {
+                    "name": name, 
+                    "qty": qty, 
+                    "p": p, 
+                    "sum": row_sum, 
+                    "cat": cat
+                }
 
 # Очистка видалених зі списку
 current_all_keys = [f"{cat}_{n}" for cat in EQUIPMENT_BASE for n in st.session_state.get(f"ms_{cat}", [])]
