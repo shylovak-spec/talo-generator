@@ -9,51 +9,38 @@ from docx.shared import Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from io import BytesIO
 import datetime
-import re
 import os
 from decimal import Decimal, ROUND_HALF_UP
 
 # ================== НАЛАШТУВАННЯ ТА КЕШУВАННЯ ==================
 
-# Точне заокруглення до 2 знаків
 def precise_round(number):
     return float(Decimal(str(number)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
-@st.cache_data(ttl=3600)  # Кешуємо базу на 1 годину, щоб зменшити кількість запитів
+@st.cache_data(ttl=3600)
 def load_full_database_from_gsheets():
-    """Зчитує всі вкладки з таблиці База_Товарів з обробкою помилок"""
     try:
-        if "gcp_service_account" not in st.secrets:
-            return {}
-            
+        if "gcp_service_account" not in st.secrets: return {}
         credentials_info = st.secrets["gcp_service_account"]
         scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
         creds = Credentials.from_service_account_info(credentials_info, scopes=scope)
         gc = gspread.authorize(creds)
-        
         sh = gc.open("База_Товарів")
-        all_sheets = sh.worksheets()
-        
         full_base = {}
-        for sheet in all_sheets:
+        for sheet in sh.worksheets():
             category_name = sheet.title
             data = sheet.get_all_records()
             items_in_cat = {}
             for row in data:
                 name = str(row.get('Назва', '')).strip()
                 price_raw = str(row.get('Ціна', 0)).replace(" ", "").replace(",", ".")
-                try:
-                    price = float(price_raw) if price_raw else 0.0
-                except:
-                    price = 0.0
-                if name:
-                    items_in_cat[name] = price
-            if items_in_cat:
-                full_base[category_name] = items_in_cat
+                try: price = float(price_raw) if price_raw else 0.0
+                except: price = 0.0
+                if name: items_in_cat[name] = price
+            if items_in_cat: full_base[category_name] = items_in_cat
         return full_base
     except Exception as e:
-        # Програма не падає, просто виводить попередження
-        st.sidebar.warning(f"⚠️ Не вдалося оновити базу з Google Sheets. Використовується локальний кеш або порожня база. ({e})")
+        st.sidebar.warning(f"⚠️ Помилка бази: {e}")
         return {}
 
 EQUIPMENT_BASE = load_full_database_from_gsheets()
@@ -81,7 +68,7 @@ VENDORS = {
     }
 }
 
-# ================== ФУНКЦІЇ ФОРМУВАННЯ ТАБЛИЦЬ ==================
+# ================== ДОПОМІЖНІ ФУНКЦІЇ ==================
 
 def format_num(n):
     return f"{precise_round(n):,.2f}".replace(",", " ").replace(".", ",")
@@ -97,41 +84,35 @@ def amount_to_text_uk(amount):
 
 def set_cell_style(cell, text, align=WD_ALIGN_PARAGRAPH.LEFT, bold=False):
     cell.text = ""
-    p = cell.paragraphs[0]
-    p.alignment = align
+    p = cell.paragraphs[0]; p.alignment = align
     run = p.add_run(str(text))
-    run.bold = bold
-    run.font.name = 'Times New Roman'
-    run.font.size = Pt(11)
+    run.bold = bold; run.font.name = 'Times New Roman'; run.font.size = Pt(11)
 
 def fill_document_table(tbl, items, tax_label, tax_rate, is_fop):
     def get_category_name(item_cat):
         c = item_cat.lower()
         if "роботи" in c or "послуги" in c: return "РОБОТИ"
-        # "Комплектуючі" тепер йдуть у МАТЕРІАЛИ
+        # "Комплектуючі" та щити -> МАТЕРІАЛИ
         if any(x in c for x in ["комплект", "щит", "кріплення", "матеріал", "кабель", "провід"]): 
             return "МАТЕРІАЛИ"
         return "ОБЛАДНАННЯ"
 
-    grouped_items = {"ОБЛАДНАННЯ": [], "МАТЕРІАЛИ": [], "РОБОТИ": []}
+    grouped = {"ОБЛАДНАННЯ": [], "МАТЕРІАЛИ": [], "РОБОТИ": []}
     grand_total = 0
     for it in items:
         cat_key = get_category_name(it['cat'])
-        grouped_items[cat_key].append(it)
+        grouped[cat_key].append(it)
         grand_total += it['sum']
 
-    sections_order = ["ОБЛАДНАННЯ", "МАТЕРІАЛИ", "РОБОТИ"]
     col_count = len(tbl.columns)
-
-    for section in sections_order:
-        sec_items = grouped_items[section]
-        if not sec_items: continue
+    for section in ["ОБЛАДНАННЯ", "МАТЕРІАЛИ", "РОБОТИ"]:
+        if not grouped[section]: continue
         row_h = tbl.add_row().cells
         if col_count >= 4: row_h[0].merge(row_h[col_count-1])
         p = row_h[0].paragraphs[0]; p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        run = p.add_run(section.upper()); run.italic = True; run.font.name = 'Times New Roman'; run.font.size = Pt(12)
+        run = p.add_run(section); run.italic = True; run.font.name = 'Times New Roman'; run.font.size = Pt(12)
         
-        for it in sec_items:
+        for it in grouped[section]:
             r = tbl.add_row().cells
             set_cell_style(r[0], it['name'])
             if col_count >= 4:
@@ -139,151 +120,111 @@ def fill_document_table(tbl, items, tax_label, tax_rate, is_fop):
                 set_cell_style(r[2], format_num(it['p']), WD_ALIGN_PARAGRAPH.RIGHT)
                 set_cell_style(r[3], format_num(it['sum']), WD_ALIGN_PARAGRAPH.RIGHT)
 
-    # ЛОГІКА ПІДСУМКУ
     if is_fop:
-        # Для ФОП тільки один рядок - сума всіх сум з колонки
-        footer_rows = [("ЗАГАЛЬНА СУМА, грн:", grand_total, True)]
+        footer = [("ЗАГАЛЬНА СУМА, грн:", grand_total, True)]
     else:
-        # Для ТОВ (ПДВ) залишаємо розбивку
-        pure_sum = precise_round(grand_total / (1 + tax_rate))
-        tax_val = precise_round(grand_total - pure_sum)
-        footer_rows = [
-            ("РАЗОМ (без ПДВ), грн:", pure_sum, False), 
-            (f"{tax_label}:", tax_val, False), 
-            ("ЗАГАЛЬНА СУМА, грн:", grand_total, True)
-        ]
+        pure = precise_round(grand_total / (1 + tax_rate))
+        footer = [("РАЗОМ (без ПДВ), грн:", pure, False), (f"{tax_label}:", grand_total-pure, False), ("ЗАГАЛЬНА СУМА, грн:", grand_total, True)]
 
-    for label, val, is_bold in footer_rows:
+    for label, val, is_bold in footer:
         row = tbl.add_row().cells
         if col_count >= 4:
             row[0].merge(row[2])
             set_cell_style(row[0], label, WD_ALIGN_PARAGRAPH.LEFT, is_bold)
             set_cell_style(row[3], format_num(val), WD_ALIGN_PARAGRAPH.RIGHT, is_bold)
-    return grand_total
 
-# ================== ЗАХИСТ ВІД ПОМИЛОК API ==================
+# ================== ІНТЕРФЕЙС STREAMLIT ==================
 
-def send_to_telegram(file_data, file_name):
-    """Безпечна відправка в Telegram"""
-    try:
-        token = st.secrets.get("telegram_bot_token")
-        chat_ids = st.secrets.get("telegram_chat_id")
-        if not token or not chat_ids: return
-        
-        if isinstance(chat_ids, str): chat_ids = [chat_ids]
-        url = f"https://api.telegram.org/bot{token}/sendDocument"
-        for chat_id in chat_ids:
-            file_data.seek(0)
-            requests.post(url, data={'chat_id': chat_id, 'caption': f"📄 {file_name}"}, files={'document': (file_name, file_data)}, timeout=10)
-        st.success("✅ Файл надіслано!")
-    except Exception as e:
-        st.error(f"⚠️ Помилка Telegram (файл можна завантажити кнопкою вище): {e}")
-
-def save_to_google_sheets(row_data):
-    """Безпечний запис у Реєстр"""
-    try:
-        credentials_info = st.secrets.get("gcp_service_account")
-        if not credentials_info: return False
-        creds = Credentials.from_service_account_info(credentials_info, scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"])
-        gc = gspread.authorize(creds)
-        sh = gc.open("Реєстр КП Talo")
-        sh.get_worksheet(0).append_row(row_data)
-        return True
-    except Exception as e:
-        st.sidebar.error(f"❌ Не вдалося записати в Реєстр: {e}")
-        return False
-
-# ================== ІНТЕРФЕЙС ТА ЛОГІКА ==================
-
-st.set_page_config(page_title="Talo Gen", layout="wide")
-st.title("⚡ Генератор КП")
+st.set_page_config(page_title="Talo Generator", layout="wide")
+st.title("⚡ Генератор КП та Специфікацій")
 
 if "selected_items" not in st.session_state: st.session_state.selected_items = {}
 if "generated_files" not in st.session_state: st.session_state.generated_files = None
 
 with st.sidebar:
-    st.write("### ⚙️ Керування")
-    if st.button("🔄 Оновити базу товарів"):
+    if st.button("🔄 Оновити базу"):
         st.cache_data.clear()
         st.rerun()
 
-with st.expander("📌 Дані", expanded=True):
-    c1, c2 = st.columns(2)
-    vendor_choice = c1.selectbox("Виконавець:", list(VENDORS.keys()))
+with st.expander("📌 Основна інформація", expanded=True):
+    col1, col2 = st.columns(2)
+    vendor_choice = col1.selectbox("Виконавець:", list(VENDORS.keys()))
     is_fop = "ФОП" in vendor_choice
     v = VENDORS[vendor_choice]
-    
-    customer = c1.text_input("Замовник", "ОСББ")
-    address = c1.text_input("Адреса об'єкта")
-    kp_num = c2.text_input("Номер КП", "1223.25")
-    manager = c2.text_input("Відповідальний", "Олексій Крамаренко")
-    date_str = c2.date_input("Дата", datetime.date.today()).strftime("%d.%m.%Y")
-    phone = c2.text_input("Телефон", "+380 (67) 477-17-18")
-    email = c2.text_input("E-mail", "o.kramarenko@talo.com.ua")
+    customer = col1.text_input("Замовник", "ОСББ")
+    address = col1.text_input("Адреса об'єкта")
+    kp_num = col2.text_input("Номер КП", "1223.25")
+    manager = col2.text_input("Відповідальний", "Олексій Крамаренко")
+    date_str = col2.date_input("Дата", datetime.date.today()).strftime("%d.%m.%Y")
+    phone = col2.text_input("Телефон", "+380 (67) 477-17-18")
+    email = col2.text_input("E-mail", "o.kramarenko@talo.com.ua")
+
+# ПОВЕРНУТИЙ БЛОК ТЕКСТУ
+st.subheader("📝 Текст для КП")
+txt_intro = st.text_area("Вступний текст", "Відповідно до наданих даних пропонуємо наступне:")
+c1, c2, c3 = st.columns(3)
+l1 = c1.text_input("Пункт 1", "Організація автономного живлення ліфтів")
+l2 = c2.text_input("Пункт 2", "Організація автономного живлення насосної")
+l3 = c3.text_input("Пункт 3", "Аварійне освітлення та відеонагляд")
 
 st.subheader("📦 Специфікація")
 tabs = st.tabs(list(EQUIPMENT_BASE.keys()))
 for i, cat in enumerate(EQUIPMENT_BASE.keys()):
     with tabs[i]:
-        selected_names = st.multiselect(f"Додати з {cat}:", list(EQUIPMENT_BASE[cat].keys()), key=f"ms_{cat}")
-        for name in selected_names:
+        selected = st.multiselect(f"Вибрати з {cat}:", list(EQUIPMENT_BASE[cat].keys()), key=f"ms_{cat}")
+        for name in selected:
             key = f"{cat}_{name}"
             base_p = float(EQUIPMENT_BASE[cat].get(name, 0))
+            # Автоматичний коефіцієнт 1.06 для ФОП
+            def_p = precise_round(base_p * 1.06) if is_fop else precise_round(base_p)
             
-            # Для ФОП автоматично додаємо 6% до ціни з бази
-            display_p = precise_round(base_p * 1.06) if is_fop else precise_round(base_p)
-            
-            col_n, col_q, col_p, col_s = st.columns([4.5, 1, 1.5, 1.5])
-            col_n.markdown(f"<div style='padding-top:10px;'>{name}</div>", unsafe_allow_html=True)
-            edit_qty = col_q.number_input("К-сть", 1, 1000, 1, key=f"q_{key}")
-            edit_p = col_p.number_input("Ціна за од.", 0.0, 1000000.0, display_p, key=f"p_{key}")
-            
-            row_sum = precise_round(edit_p * edit_qty)
-            col_s.markdown(f"<div style='padding-top:10px; font-weight:bold; text-align:right;'>{format_num(row_sum)} грн</div>", unsafe_allow_html=True)
-            st.session_state.selected_items[key] = {"name": name, "qty": edit_qty, "p": edit_p, "sum": row_sum, "cat": cat}
+            cn, cq, cp, cs = st.columns([4.5, 1, 1.5, 1.5])
+            cn.markdown(f"<div style='padding-top:10px;'>{name}</div>", unsafe_allow_html=True)
+            q = cq.number_input("К-сть", 1, 1000, 1, key=f"q_{key}")
+            p = cp.number_input("Ціна", 0.0, 1000000.0, def_p, key=f"p_{key}")
+            row_sum = precise_round(p * q)
+            cs.markdown(f"<div style='padding-top:10px; font-weight:bold; text-align:right;'>{format_num(row_sum)}</div>", unsafe_allow_html=True)
+            st.session_state.selected_items[key] = {"name": name, "qty": q, "p": p, "sum": row_sum, "cat": cat}
 
-# Видалення позицій, які були прибрані з multiselect
-all_active_keys = [f"{cat}_{n}" for cat in EQUIPMENT_BASE for n in st.session_state.get(f"ms_{cat}", [])]
-st.session_state.selected_items = {k: v for k, v in st.session_state.selected_items.items() if k in all_active_keys}
-items_list = list(st.session_state.selected_items.values())
+# Очищення неактивних
+active_keys = [f"{cat}_{n}" for cat in EQUIPMENT_BASE for n in st.session_state.get(f"ms_{cat}", [])]
+st.session_state.selected_items = {k: v for k, v in st.session_state.selected_items.items() if k in active_keys}
+final_items = list(st.session_state.selected_items.values())
 
-if items_list:
-    total_val = sum(it["sum"] for it in items_list)
-    st.info(f"🚀 **ЗАГАЛЬНА СУМА: {format_num(total_val)} грн**")
+if final_items:
+    total = sum(it["sum"] for it in final_items)
+    st.info(f"🚀 **ЗАГАЛЬНА СУМА: {format_num(total)} грн**")
 
     if st.button("🚀 ЗГЕНЕРУВАТИ ДОКУМЕНТИ", type="primary", use_container_width=True):
-        # Дані для замін
         reps = {
             "vendor_name": v["full"], "vendor_address": v["adr"], "vendor_inn": v["inn"],
             "vendor_iban": v["iban"], "vendor_bank": v["bank"], "vendor_email": email, "vendor_short_name": v["short"],
             "customer": customer, "address": address, "kp_num": kp_num, "date": date_str,
-            "manager": manager, "phone": phone, "email": email, "spec_id_postavka": kp_num,
-            "total_sum_digits": format_num(total_val), "total_sum_words": amount_to_text_uk(total_val)
+            "manager": manager, "phone": phone, "email": email, "spec_id_postavka": kp_num, "spec_id_roboti": kp_num,
+            "txt_intro": txt_intro, "line1": l1, "line2": l2, "line3": l3,
+            "total_sum_digits": format_num(total), "total_sum_words": amount_to_text_uk(total)
         }
-        
-        # Безпечний лог в таблицю
-        save_to_google_sheets([date_str, kp_num, customer, address, vendor_choice, total_val, manager])
         
         # Генерація файлів
         res = {}
         for k, t_file in {"kp": "template.docx", "p": "template_postavka.docx", "w": "template_roboti.docx"}.items():
             if os.path.exists(t_file):
                 doc = Document(t_file)
-                # Функція заміни тегів (спрощена для надійності)
-                for p in doc.paragraphs:
-                    for key, val in reps.items():
-                        if f"{{{{{key}}}}}" in p.text: p.text = p.text.replace(f"{{{{{key}}}}}", str(val))
-                for table in doc.tables:
-                    for row in table.rows:
+                # Заміна тегів у тексті та таблицях
+                for p in list(doc.paragraphs):
+                    for tag, val in reps.items():
+                        if f"{{{{{tag}}}}}" in p.text: p.text = p.text.replace(f"{{{{{tag}}}}}", str(val))
+                for tbl in doc.tables:
+                    for row in tbl.rows:
                         for cell in row.cells:
                             for p in cell.paragraphs:
-                                for key, val in reps.items():
-                                    if f"{{{{{key}}}}}" in p.text: p.text = p.text.replace(f"{{{{{key}}}}}", str(val))
+                                for tag, val in reps.items():
+                                    if f"{{{{{tag}}}}}" in p.text: p.text = p.text.replace(f"{{{{{tag}}}}}", str(val))
                 
-                # Фільтрація по категоріях для специфікацій
-                it_to_fill = items_list
-                if k == "p": it_to_fill = [i for i in items_list if "роботи" not in i["cat"].lower()]
-                if k == "w": it_to_fill = [i for i in items_list if "роботи" in i["cat"].lower()]
+                # Фільтрація для специфікацій
+                it_to_fill = final_items
+                if k == "p": it_to_fill = [i for i in final_items if "роботи" not in i["cat"].lower()]
+                if k == "w": it_to_fill = [i for i in final_items if "роботи" in i["cat"].lower()]
                 
                 if it_to_fill:
                     fill_document_table(doc.tables[0], it_to_fill, v['tax_label'], v['tax_rate'], is_fop)
@@ -293,7 +234,6 @@ if items_list:
         st.session_state.generated_files = res
         st.rerun()
 
-# Вивід кнопок завантаження
 if st.session_state.generated_files:
     cols = st.columns(len(st.session_state.generated_files))
     for i, (k, info) in enumerate(st.session_state.generated_files.items()):
