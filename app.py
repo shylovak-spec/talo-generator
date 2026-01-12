@@ -11,7 +11,6 @@ from io import BytesIO
 import datetime
 import re
 import os
-import math
 from decimal import Decimal, ROUND_HALF_UP
 
 # Спробуємо імпортувати num2words для суми прописом
@@ -28,7 +27,7 @@ VENDORS = {
         "inn": "32670939",
         "adr": "03113, м. Київ, проспект Перемоги, будинок 68/1 офіс 62",
         "iban": "_________",
-        "bank": "__________",
+        "bank": "АТ «УКРСИББАНК»",
         "tax_label": "ПДВ (20%)",
         "tax_rate": 0.20
     },
@@ -45,7 +44,7 @@ VENDORS = {
     "ФОП Шилова Ксенія Вікторівна": {
         "full": "ФОП Шилова Ксенія Вікторівна",
         "short": "Ксенія ШИЛОВА",
-        "inn": "3237308989 ",
+        "inn": "3237308989",
         "adr": "20901 м. Чигирин, вул. Миру 4, кв. 43",
         "iban": "UA433220010000026007350102344",
         "bank": "АТ УНІВЕРСАЛ БАНК",
@@ -56,15 +55,12 @@ VENDORS = {
 
 # ================== ДОПОМІЖНІ ФУНКЦІЇ ==================
 def precise_round(number, decimals=2):
-    """Математичне заокруглення (0.005 -> 0.01)"""
     return float(Decimal(str(number)).quantize(Decimal('1.' + '0' * decimals), rounding=ROUND_HALF_UP))
 
 def format_num(n):
-    """Форматування чисел: 1 234,56"""
     return f"{n:,.2f}".replace(",", " ").replace(".", ",")
 
 def amount_to_text_uk(amount):
-    """Сума прописом (ціле число гривень)"""
     val = int(precise_round(amount, 0))
     if num2words is None: return f"{format_num(amount)} грн."
     try:
@@ -224,12 +220,11 @@ def convert_docx_to_pdf(docx_data):
 st.set_page_config(page_title="Talo Generator", layout="wide")
 EQUIPMENT_BASE = load_full_database_from_gsheets()
 
-# ПЕРЕВІРКА: якщо база порожня (через помилку API), не малюємо вкладки
 if not EQUIPMENT_BASE:
     st.error("❌ Не вдалося завантажити базу товарів через обмеження Google API. Будь ласка, зачекайте 1 хвилину та оновіть сторінку.")
-    st.stop() # Зупиняє виконання коду далі
+    st.stop()
 else:
-    # УСЕ, ЩО НИЖЧЕ, ТЕПЕР МАЄ ВІДСТУП (знаходиться всередині else)
+    # УСЕ МАЄ БУТИ ВСЕРЕДИНІ ELSE (відступ)
     if "generated_files" not in st.session_state: 
         st.session_state.generated_files = None
     if "selected_items" not in st.session_state: 
@@ -240,8 +235,6 @@ else:
     with st.expander("📌 Основна інформація", expanded=True):
         col1, col2 = st.columns(2)
         vendor_choice = col1.selectbox("Виконавець:", list(VENDORS.keys()))
-        
-        # Логіка автоматично розпізнає будь-якого ФОП
         is_fop_selected = "ФОП" in vendor_choice 
         v = VENDORS[vendor_choice]
         
@@ -254,9 +247,14 @@ else:
         phone = col2.text_input("Телефон", "+380 (67) 477-17-18")
         email = col2.text_input("E-mail", "o.kramarenko@talo.com.ua")
 
+    st.subheader("📝 Текст для КП")
+    txt_intro = st.text_area("Вступний текст", "Відповідно до наданих даних пропонуємо наступне:")
+    c1, c2, c3 = st.columns(3)
+    l1 = c1.text_input("Пункт 1", "Організація автономного живлення ліфтів")
+    l2 = c2.text_input("Пункт 2", "Організація автономного живлення насосної")
+    l3 = c3.text_input("Пункт 3", "Аварійне освітлення та відеонагляд")
+
     st.subheader("📦 Специфікація")
-    
-    # Створюємо вкладки тільки якщо EQUIPMENT_BASE не порожній
     tabs = st.tabs(list(EQUIPMENT_BASE.keys()))
     
     for i, cat in enumerate(EQUIPMENT_BASE.keys()):
@@ -265,86 +263,71 @@ else:
             for name in selected_names:
                 key = f"{cat}_{name}"
                 b_price = float(EQUIPMENT_BASE.get(cat, {}).get(name, 0))
-                
-                # Націнка 6% для ФОП
                 display_p = precise_round(b_price * 1.06) if is_fop_selected else precise_round(b_price)
                 
                 c_n, c_q, c_w, c_p, c_s = st.columns([4.5, 0.8, 0.4, 1.5, 1.2])
                 c_n.markdown(f"<div style='padding-top: 10px;'>{name}</div>", unsafe_allow_html=True)
-                
                 qty = c_q.number_input("К-сть", 1, 500, 1, key=f"q_{key}", label_visibility="collapsed")
-                
                 if b_price == 0: 
                     c_w.markdown("<div style='color:red;padding-top:10px;'>!!</div>", unsafe_allow_html=True)
-                
                 p = c_p.number_input("Ціна", 0.0, 1000000.0, float(display_p), step=0.01, key=f"p_{key}", label_visibility="collapsed")
-                
                 row_sum = precise_round(p * qty)
                 c_s.markdown(f"<div style='padding-top:10px;text-align:right;'><b>{format_num(row_sum)} грн</b></div>", unsafe_allow_html=True)
-                
-                # Зберігаємо вибране в сесію
-                st.session_state.selected_items[key] = {
-                    "name": name, 
-                    "qty": qty, 
-                    "p": p, 
-                    "sum": row_sum, 
-                    "cat": cat
-                }
+                st.session_state.selected_items[key] = {"name": name, "qty": qty, "p": p, "sum": row_sum, "cat": cat}
 
-# Очистка видалених зі списку
-current_all_keys = [f"{cat}_{n}" for cat in EQUIPMENT_BASE for n in st.session_state.get(f"ms_{cat}", [])]
-st.session_state.selected_items = {k: v for k, v in st.session_state.selected_items.items() if k in current_all_keys}
+    # Очистка видалених
+    current_keys = [f"{cat}_{n}" for cat in EQUIPMENT_BASE for n in st.session_state.get(f"ms_{cat}", [])]
+    st.session_state.selected_items = {k: v for k, v in st.session_state.selected_items.items() if k in current_keys}
+    all_items = list(st.session_state.selected_items.values())
 
-all_items = list(st.session_state.selected_items.values())
+    if all_items:
+        total_final = precise_round(sum(it["sum"] for it in all_items))
+        st.info(f"🚀 **РАЗОМ: {format_num(total_final)} грн**")
 
-if all_items:
-    total_final = precise_round(sum(it["sum"] for it in all_items))
-    st.info(f"🚀 **РАЗОМ: {format_num(total_final)} грн**")
+        if st.button("🚀 ЗГЕНЕРУВАТИ ВСІ ДОКУМЕНТИ", type="primary", use_container_width=True):
+            safe_addr = re.sub(r'[\\/*?:"<>|]', "", address).replace(" ", "_")
+            tax_amt = precise_round(total_final - (total_final / (1 + v['tax_rate']))) if not is_fop_selected else 0.0
+            
+            # Додано vendor_bank та пункти тексту
+            base_reps = {
+                "vendor_name": v["full"], "vendor_address": v["adr"], "vendor_inn": v["inn"], 
+                "vendor_iban": v["iban"], "vendor_bank": v["bank"],
+                "customer": customer, "address": address, "kp_num": kp_num, "date": date_str, "manager": manager,
+                "phone": phone, "email": email, "total_sum_digits": format_num(total_final),
+                "total_sum_words": amount_to_text_uk(total_final), "tax_label": v['tax_label'], "tax_amount_val": format_num(tax_amt),
+                "intro_text": txt_intro, "l1": l1, "l2": l2, "l3": l3
+            }
+            
+            save_to_google_sheets([date_str, kp_num, customer, address, vendor_choice, total_final, manager])
+            results = {}
+            templates = {"kp": ("template.docx", f"КП_{kp_num}_{safe_addr}.docx"),
+                         "p": ("template_postavka.docx", f"Специфікація_ОБЛ_{kp_num}.docx"),
+                         "w": ("template_roboti.docx", f"Специфікація_РОБ_{kp_num}.docx")}
+            
+            for k, (t_file, out_name) in templates.items():
+                if os.path.exists(t_file):
+                    it_list = all_items
+                    if k == "p": it_list = [i for i in all_items if "роботи" not in i["cat"].lower()]
+                    if k == "w": it_list = [i for i in all_items if "роботи" in i["cat"].lower()]
+                    if it_list:
+                        doc = Document(t_file); set_document_font(doc)
+                        l_total = precise_round(sum(i['sum'] for i in it_list))
+                        r_copy = base_reps.copy()
+                        r_copy.update({"total_sum_digits": format_num(l_total), "total_sum_words": amount_to_text_uk(l_total)})
+                        replace_headers_styled(doc, r_copy)
+                        fill_document_table(doc.tables[0], it_list, v['tax_label'], v['tax_rate'], is_fop=is_fop_selected)
+                        buf = BytesIO(); doc.save(buf); buf.seek(0)
+                        results[k] = {"name": out_name, "data": buf}
+            
+            st.session_state.generated_files = results
+            st.rerun()
 
-    if st.button("🚀 ЗГЕНЕРУВАТИ ВСІ ДОКУМЕНТИ", type="primary", use_container_width=True):
-        safe_addr = re.sub(r'[\\/*?:"<>|]', "", address).replace(" ", "_")
-        tax_amt = precise_round(total_final - (total_final / (1 + v['tax_rate']))) if not is_fop_selected else 0.0
-        
-        base_reps = {
-            "vendor_name": v["full"], "vendor_address": v["adr"], "vendor_inn": v["inn"], "vendor_iban": v["iban"],
-            "customer": customer, "address": address, "kp_num": kp_num, "date": date_str, "manager": manager,
-            "phone": phone, "email": email, "total_sum_digits": format_num(total_final),
-            "total_sum_words": amount_to_text_uk(total_final), "tax_label": v['tax_label'], "tax_amount_val": format_num(tax_amt)
-        }
-        
-        save_to_google_sheets([date_str, kp_num, customer, address, vendor_choice, total_final, manager])
-        results = {}
-        
-        templates = {"kp": ("template.docx", f"КП_{kp_num}_{safe_addr}.docx"),
-                     "p": ("template_postavka.docx", f"Специфікація_ОБЛ_{kp_num}.docx"),
-                     "w": ("template_roboti.docx", f"Специфікація_РОБ_{kp_num}.docx")}
-        
-        for k, (t_file, out_name) in templates.items():
-            if os.path.exists(t_file):
-                it_list = all_items
-                if k == "p": it_list = [i for i in all_items if "роботи" not in i["cat"].lower()]
-                if k == "w": it_list = [i for i in all_items if "роботи" in i["cat"].lower()]
-                
-                if it_list:
-                    doc = Document(t_file); set_document_font(doc)
-                    l_total = precise_round(sum(i['sum'] for i in it_list))
-                    r_copy = base_reps.copy()
-                    r_copy.update({"total_sum_digits": format_num(l_total), "total_sum_words": amount_to_text_uk(l_total)})
-                    replace_headers_styled(doc, r_copy)
-                    fill_document_table(doc.tables[0], it_list, v['tax_label'], v['tax_rate'], is_fop=is_fop_selected)
-                    buf = BytesIO(); doc.save(buf); buf.seek(0)
-                    results[k] = {"name": out_name, "data": buf}
-        
-        st.session_state.generated_files = results
-        st.rerun()
-
-if st.session_state.generated_files:
-    cols = st.columns(len(st.session_state.generated_files))
-    for i, (k, info) in enumerate(st.session_state.generated_files.items()):
-        cols[i].download_button(f"💾 {info['name']}", info['data'], info['name'], key=f"dl_{k}")
-    
-    if "kp" in st.session_state.generated_files:
-        if st.button("🚀 Надіслати КП у PDF Керівнику", use_container_width=True):
-            with st.spinner("Конвертація..."):
-                pdf = convert_docx_to_pdf(st.session_state.generated_files["kp"]["data"])
-                if pdf: send_to_telegram(pdf, st.session_state.generated_files["kp"]["name"].replace(".docx", ".pdf"))
+    if st.session_state.generated_files:
+        cols = st.columns(len(st.session_state.generated_files))
+        for i, (k, info) in enumerate(st.session_state.generated_files.items()):
+            cols[i].download_button(f"💾 {info['name']}", info['data'], info['name'], key=f"dl_{k}")
+        if "kp" in st.session_state.generated_files:
+            if st.button("🚀 Надіслати КП у PDF Керівнику", use_container_width=True):
+                with st.spinner("Конвертація..."):
+                    pdf = convert_docx_to_pdf(st.session_state.generated_files["kp"]["data"])
+                    if pdf: send_to_telegram(pdf, st.session_state.generated_files["kp"]["name"].replace(".docx", ".pdf"))
