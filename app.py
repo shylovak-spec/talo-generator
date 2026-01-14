@@ -285,7 +285,7 @@ if items_to_generate:
     st.write("---")
     c_gen, c_tg = st.columns(2)
     
-    if c_gen.button("📄 1. ЗГЕНЕРУВАТИ ТА ОНОВИТИ РЕЄСТР", use_container_width=True):
+    if c_gen.button("📄 1. ЗГЕНЕРУВАТИ ДОКУМЕНТИ", use_container_width=True):
         calc_total = 0
         for it in items_to_generate:
             _, row_s = calculate_row(it['p'], it['qty'], is_fop)
