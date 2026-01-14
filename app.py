@@ -301,16 +301,25 @@ if items_to_generate:
             if os.path.exists(full_tpl_path):
                 doc = Document(full_tpl_path)
                 
-                # Заміна з форматуванням (жирне до двокрапки)
-                replace_with_formatting(doc, reps)
-                
+                # Визначаємо, які товари йдуть у цей файл
                 it_fill = items_to_generate
                 if "ОБЛ" in label: it_fill = [i for i in items_to_generate if "роботи" not in i["cat"].lower()]
                 if "РОБ" in label: it_fill = [i for i in items_to_generate if "роботи" in i["cat"].lower()]
                 
                 if it_fill:
-                    fill_document_table(doc, it_fill, v['tax_label'], v['tax_rate'], is_fop)
-                    buf = BytesIO(); doc.save(buf); buf.seek(0)
+                    # 1. Спершу заповнюємо таблицю та отримуємо ТОЧНУ суму, яка в ній вийшла
+                    actual_total = fill_document_table(doc, it_fill, v['tax_label'], v['tax_rate'], is_fop)
+                    
+                    # 2. Оновлюємо значення суми цифрами та прописом саме для ЦЬОГО документа
+                    reps["total_sum_digits"] = format_num(actual_total)
+                    reps["total_sum_words"] = amount_to_text_uk(actual_total)
+                    
+                    # 3. Тільки тепер робимо заміну плейсхолдерів у тексті
+                    replace_with_formatting(doc, reps)
+                    
+                    buf = BytesIO()
+                    doc.save(buf)
+                    buf.seek(0)
                     results[label] = {"name": f"{label}_{kp_num}_{clean_addr}.docx", "data": buf}
         
         st.session_state.generated_files = results
