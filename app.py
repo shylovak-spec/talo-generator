@@ -45,11 +45,20 @@ def calculate_row(price_from_st, qty, is_fop):
 
 def amount_to_text_uk(amount):
     val = precise_round(amount)
+    # Розділяємо на гривні та копійки
+    grn = int(val)
+    kop = int(round((val - grn) * 100))
+    
     if num2words is None:
         return f"{format_num(val)} грн."
+    
     try:
-        words = num2words(int(val), lang='uk').capitalize()
-        return f"{words} гривень 00 копійок"
+        # Перетворюємо в слова тільки цілу частину (гривні)
+        words = num2words(grn, lang='uk').capitalize()
+        
+        # Формуємо рядок: Слова гривень, копійки цифрами
+        # Наприклад: "Сто двадцять вісім тисяч двісті шістдесят гривень, 04 коп."
+        return f"{words} гривень, {kop:02d} коп."
     except:
         return f"{format_num(val)} грн."
 
