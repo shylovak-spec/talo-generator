@@ -260,3 +260,13 @@ if st.session_state.generated_files:
     cols = st.columns(len(st.session_state.generated_files))
     for i, (k, info) in enumerate(st.session_state.generated_files.items()):
         cols[i].download_button(f"💾 {info['name']}", info['data'], info['name'])
+
+# КНОПКА TELEGRAM ТУТ
+    st.write("---")
+    tg_msg = f"📄 Нове КП №{kp_num}\n🏢 Замовник: {customer}\n📍 Адреса: {address}\n💰 Сума: {format_num(temp_grand_total)} грн."
+    if st.button("🚀 ВІДПРАВИТИ КП В TELEGRAM", use_container_width=True):
+        with st.spinner("Відправка документів..."):
+            if send_to_telegram(st.session_state.generated_files, tg_msg):
+                st.success("✅ Файли успішно відправлені в Telegram!")
+            else:
+                st.error("❌ Помилка при відправці в Telegram.")
