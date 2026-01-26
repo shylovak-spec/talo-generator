@@ -8,6 +8,7 @@ from docx.oxml.ns import qn
 from io import BytesIO
 import datetime
 import os
+import requests
 from decimal import Decimal, ROUND_HALF_UP
 
 # Спроба імпорту num2words
@@ -17,7 +18,29 @@ except ImportError:
     num2words = None
 
 # ==============================================================================
-# 1. ТЕХНІЧНІ ФУНКЦІЇ
+# 0. НАЛАШТУВАННЯ TELEGRAM
+# ==============================================================================
+TELEGRAM_TOKEN = st.secrets.get("telegram_token", "ТВІЙ_ТОКЕН")
+TELEGRAM_CHAT_ID = st.secrets.get("telegram_chat_id", "ТВІЙ_ID")
+
+def send_to_telegram(files_dict, message_text):
+    """Відправляє згенеровані файли в Telegram чат."""
+    success = True
+    for label, info in files_dict.items():
+        try:
+            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendDocument"
+            files = {'document': (info['name'], info['data'].getvalue())}
+            data = {'chat_id': TELEGRAM_CHAT_ID, 'caption': message_text if label == "КП" else ""}
+            response = requests.post(url, data=data, files=files)
+            if not response.ok:
+                success = False
+        except Exception as e:
+            st.error(f"Помилка відправки {label}: {e}")
+            success = False
+    return success
+
+# ==============================================================================
+# 1. ТЕХНІЧНІ ФУНКЦІЇ (БЕЗ ЗМІН)
 # ==============================================================================
 
 def parse_price(val):
@@ -77,7 +100,7 @@ VENDORS = {
 }
 
 # ==============================================================================
-# 2. ФОРМАТУВАННЯ DOCX
+# 2. ФОРМАТУВАННЯ DOCX (БЕЗ ЗМІН)
 # ==============================================================================
 
 def apply_font_style(run, size=12, bold=False):
@@ -89,7 +112,6 @@ def apply_font_style(run, size=12, bold=False):
     r.get_or_add_rFonts().set(qn('w:hAnsi'), 'Times New Roman')
 
 def replace_text_in_paragraph(p, reps):
-    # Зшиваємо текст, щоб уникнути розбиття тегів {{...}}
     full_text = p.text
     changed = False
     for k, v in reps.items():
@@ -97,7 +119,6 @@ def replace_text_in_paragraph(p, reps):
         if placeholder in full_text:
             full_text = full_text.replace(placeholder, str(v))
             changed = True
-    
     if changed:
         p.text = ""
         if ":" in full_text:
@@ -130,7 +151,6 @@ def fill_document_table(doc, items, vendor_info, is_fop, is_specification):
             target_table = tbl
             break
     if not target_table: return 0
-
     cols = len(target_table.columns)
     total_pure = 0
     categories = {}
@@ -138,7 +158,6 @@ def fill_document_table(doc, items, vendor_info, is_fop, is_specification):
         cat = it['cat'].upper()
         if cat not in categories: categories[cat] = []
         categories[cat].append(it)
-
     for cat_name, cat_items in categories.items():
         row_cat = target_table.add_row()
         row_cat.cells[0].merge(row_cat.cells[cols-1])
@@ -152,17 +171,15 @@ def fill_document_table(doc, items, vendor_info, is_fop, is_specification):
             set_cell_style(r.cells[1], str(it['qty']), WD_ALIGN_PARAGRAPH.CENTER)
             set_cell_style(r.cells[2], format_num(p_unit), WD_ALIGN_PARAGRAPH.RIGHT)
             set_cell_style(r.cells[3], format_num(row_sum), WD_ALIGN_PARAGRAPH.RIGHT)
-
     tax_val = precise_round(total_pure * vendor_info['tax_rate'])
     final_total = precise_round(total_pure + tax_val)
-
     if is_fop and is_specification:
         r = target_table.add_row()
         r.cells[0].merge(r.cells[cols-2])
         set_cell_style(r.cells[0], "ЗАГАЛЬНА СУМА, грн:", WD_ALIGN_PARAGRAPH.LEFT, True)
         set_cell_style(r.cells[cols-1], format_num(final_total), WD_ALIGN_PARAGRAPH.RIGHT, True)
     else:
-        for lbl, val, bld in [("РАЗОМ, грн:", total_pure, False), (f"{vendor_info['tax_label']}:", tax_val, False), ("ЗАГАЛЬНА СУМА, грн:", final_total, True)]:
+        for lbl, val, bld in [("РАЗОМ (без ПДВ), грн:", total_pure, False), (f"{vendor_info['tax_label']}:", tax_val, False), ("ЗАГАЛЬНА СУМА, грн:", final_total, True)]:
             r = target_table.add_row()
             r.cells[0].merge(r.cells[cols-2])
             set_cell_style(r.cells[0], lbl, WD_ALIGN_PARAGRAPH.LEFT, bld)
@@ -194,7 +211,6 @@ with st.expander("📌 Основні дані", expanded=True):
 
 txt_intro = st.text_area("Вступний текст", "Відповідно до наданих даних пропонуємо наступне:")
 
-# НОВИЙ БЛОК: Поля для пунктів (line1, line2, line3)
 col_l1, col_l2, col_l3 = st.columns(3)
 l1 = col_l1.text_input("Пункт 1", "Автономне живлення ліфтів")
 l2 = col_l2.text_input("Пункт 2", "Автономне живлення насосної")
@@ -214,7 +230,6 @@ if EQUIPMENT_BASE:
                 p = cp.number_input("Ціна за од.", 0.0, 1000000.0, float(base_p), key=f"prc_{cat}_{name}")
                 items_to_generate.append({"name": name, "qty": q, "p": p, "cat": cat})
 
-# Відображення на стрімліт загальної суми
 if items_to_generate:
     temp_total_pure = sum(it['p'] * it['qty'] for it in items_to_generate)
     temp_tax = temp_total_pure * v['tax_rate']
@@ -227,20 +242,17 @@ if items_to_generate:
             "vendor_iban": v["iban"], "vendor_bank": v["bank"], "vendor_email": v["email"],
             "customer": customer, "address": address, "kp_num": kp_num, "date": date_str, 
             "manager": manager, "phone": phone, "email": email, "txt_intro": txt_intro,
-            "line1": l1, "line2": l2, "line3": l3, # Передаємо ці значення в шаблон
+            "line1": l1, "line2": l2, "line3": l3,
             "spec_id_roboti": kp_num, "spec_id_postavka": kp_num
         }
-        
         results = {}
         file_map = {"КП": "template.docx", "Специфікація_ОБЛ": "template_postavka.docx", "Специфікація_РОБ": "template_roboti.docx"}
-        
         for label, tpl_name in file_map.items():
             if os.path.exists(tpl_name):
                 doc = Document(tpl_name)
                 it_fill = items_to_generate
                 if "ОБЛ" in label: it_fill = [i for i in items_to_generate if "роботи" not in i["cat"].lower()]
                 if "РОБ" in label: it_fill = [i for i in items_to_generate if "роботи" in i["cat"].lower()]
-                
                 if it_fill:
                     final_sum = fill_document_table(doc, it_fill, v, is_fop, "Специфікація" in label)
                     reps["total_sum_digits"] = format_num(final_sum)
@@ -248,11 +260,7 @@ if items_to_generate:
                     replace_with_formatting(doc, reps)
                     buf = BytesIO()
                     doc.save(buf); buf.seek(0)
-                    
-                    if label == "КП":
-                        filename = f"КП_{kp_num}_{address}.docx"
-                    else:
-                        filename = f"{label}_{kp_num}.docx"
+                    filename = f"КП_{kp_num}_{address}.docx" if label == "КП" else f"{label}_{kp_num}.docx"
                     results[label] = {"name": filename, "data": buf}
         st.session_state.generated_files = results
 
@@ -260,8 +268,8 @@ if st.session_state.generated_files:
     cols = st.columns(len(st.session_state.generated_files))
     for i, (k, info) in enumerate(st.session_state.generated_files.items()):
         cols[i].download_button(f"💾 {info['name']}", info['data'], info['name'])
-
-# КНОПКА TELEGRAM ТУТ
+    
+    # КНОПКА TELEGRAM ТУТ
     st.write("---")
     tg_msg = f"📄 Нове КП №{kp_num}\n🏢 Замовник: {customer}\n📍 Адреса: {address}\n💰 Сума: {format_num(temp_grand_total)} грн."
     if st.button("🚀 ВІДПРАВИТИ КП В TELEGRAM", use_container_width=True):
