@@ -23,21 +23,16 @@ except ImportError:
 TELEGRAM_TOKEN = st.secrets.get("telegram_token", "ТВІЙ_ТОКЕН")
 TELEGRAM_CHAT_ID = st.secrets.get("telegram_chat_id", "ТВІЙ_ID")
 
-def send_to_telegram(files_dict, message_text):
-    """Відправляє згенеровані файли в Telegram чат."""
-    success = True
-    for label, info in files_dict.items():
-        try:
-            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendDocument"
-            files = {'document': (info['name'], info['data'].getvalue())}
-            data = {'chat_id': TELEGRAM_CHAT_ID, 'caption': message_text if label == "КП" else ""}
-            response = requests.post(url, data=data, files=files)
-            if not response.ok:
-                success = False
-        except Exception as e:
-            st.error(f"Помилка відправки {label}: {e}")
-            success = False
-    return success
+def send_telegram_file(file_bytes, file_name):
+    token = st.secrets.get("telegram_bot_token")
+    chat_id = st.secrets.get("telegram_chat_id")
+    if not token or not chat_id: return
+    url = f"https://api.telegram.org/bot{token}/sendDocument"
+    try:
+        files = {'document': (file_name, file_bytes)}
+        requests.post(url, files=files, data={'chat_id': chat_id})
+        st.toast(f"✅ Відправлено КП в Telegram")
+    except: pass
 
 # ==============================================================================
 # 1. ТЕХНІЧНІ ФУНКЦІЇ (БЕЗ ЗМІН)
