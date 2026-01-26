@@ -162,7 +162,7 @@ def fill_document_table(doc, items, vendor_info, is_fop, is_specification):
         set_cell_style(r.cells[0], "ЗАГАЛЬНА СУМА, грн:", WD_ALIGN_PARAGRAPH.LEFT, True)
         set_cell_style(r.cells[cols-1], format_num(final_total), WD_ALIGN_PARAGRAPH.RIGHT, True)
     else:
-        for lbl, val, bld in [("РАЗОМ (без ПДВ), грн:", total_pure, False), (f"{vendor_info['tax_label']}:", tax_val, False), ("ЗАГАЛЬНА СУМА, грн:", final_total, True)]:
+        for lbl, val, bld in [("РАЗОМ, грн:", total_pure, False), (f"{vendor_info['tax_label']}:", tax_val, False), ("ЗАГАЛЬНА СУМА, грн:", final_total, True)]:
             r = target_table.add_row()
             r.cells[0].merge(r.cells[cols-2])
             set_cell_style(r.cells[0], lbl, WD_ALIGN_PARAGRAPH.LEFT, bld)
