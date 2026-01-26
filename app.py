@@ -9,6 +9,8 @@ from io import BytesIO
 import datetime
 import os
 import requests
+import subprocess
+import tempfile
 from decimal import Decimal, ROUND_HALF_UP
 
 # Спроба імпорту num2words
@@ -18,19 +20,47 @@ except ImportError:
     num2words = None
 
 # ==============================================================================
-# 0. НАЛАШТУВАННЯ TELEGRAM
+# 0. НАЛАШТУВАННЯ TELEGRAM ТА PDF
 # ==============================================================================
 TELEGRAM_TOKEN = st.secrets.get("telegram_token", "ТВІЙ_ТОКЕН")
 TELEGRAM_CHAT_ID = st.secrets.get("telegram_chat_id", "ТВІЙ_ID")
 
+def docx_to_pdf(docx_data):
+    """Конвертує docx (BytesIO) в pdf (bytes) за допомогою LibreOffice."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        input_path = os.path.join(tmpdir, "file.docx")
+        with open(input_path, "wb") as f:
+            f.write(docx_data.getvalue())
+        
+        try:
+            subprocess.run([
+                "lowriter", "--headless", "--convert-to", "pdf",
+                "--outdir", tmpdir, input_path
+            ], check=True, capture_output=True)
+            
+            pdf_path = os.path.join(tmpdir, "file.pdf")
+            with open(pdf_path, "rb") as f:
+                return f.read()
+        except Exception as e:
+            st.error(f"Помилка PDF конвертації: {e}")
+            return None
+
 def send_to_telegram(files_dict, message_text):
-    """Відправляє згенеровані файли в Telegram чат."""
+    """Відправляє згенеровані файли (конвертовані в PDF) в Telegram чат."""
     success = True
     for label, info in files_dict.items():
         try:
+            # Конвертуємо в PDF перед відправкою
+            pdf_bytes = docx_to_pdf(info['data'])
+            if not pdf_bytes:
+                success = False
+                continue
+
             url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendDocument"
-            files = {'document': (info['name'], info['data'].getvalue())}
+            pdf_name = info['name'].replace(".docx", ".pdf")
+            files = {'document': (pdf_name, pdf_bytes)}
             data = {'chat_id': TELEGRAM_CHAT_ID, 'caption': message_text if label == "КП" else ""}
+            
             response = requests.post(url, data=data, files=files)
             if not response.ok:
                 success = False
@@ -272,9 +302,9 @@ if st.session_state.generated_files:
     # КНОПКА TELEGRAM ТУТ
     st.write("---")
     tg_msg = f"📄 Нове КП №{kp_num}\n🏢 Замовник: {customer}\n📍 Адреса: {address}\n💰 Сума: {format_num(temp_grand_total)} грн."
-    if st.button("🚀 ВІДПРАВИТИ КП В TELEGRAM", use_container_width=True):
-        with st.spinner("Відправка документів..."):
+    if st.button("🚀 ВІДПРАВИТИ КП В TELEGRAM (PDF)", use_container_width=True):
+        with st.spinner("Конвертація в PDF та відправка..."):
             if send_to_telegram(st.session_state.generated_files, tg_msg):
-                st.success("✅ Файли успішно відправлені в Telegram!")
+                st.success("✅ PDF файли успішно відправлені в Telegram!")
             else:
-                st.error("❌ Помилка при відправці в Telegram.")
+                st.error("❌ Помилка при конвертації або відправці.")
