@@ -104,10 +104,13 @@ def set_cell_style(cell, text, align=WD_ALIGN_PARAGRAPH.LEFT, bold=False, italic
     apply_font_style(run, 12, bold, italic)
 
 def replace_with_formatting(doc, reps):
+    # 1. Заміна в параграфах тексту
     for p in doc.paragraphs:
         for k, v in reps.items():
             placeholder = f"{{{{{k}}}}}"
             if placeholder in p.text:
+                # Використовуємо спеціальний метод для збереження форматування, 
+                # але спрощуємо для надійності
                 full_text = p.text.replace(placeholder, str(v))
                 p.text = ""
                 if ":" in full_text:
@@ -116,6 +119,20 @@ def replace_with_formatting(doc, reps):
                     apply_font_style(p.add_run(parts[1]), 12)
                 else:
                     apply_font_style(p.add_run(full_text), 12)
+
+    # 2. Заміна всередині ВСІХ таблиць (для шапки документа)
+    for tbl in doc.tables:
+        for row in tbl.rows:
+            for cell in row.cells:
+                for p in cell.paragraphs:
+                    for k, v in reps.items():
+                        placeholder = f"{{{{{k}}}}}"
+                        if placeholder in p.text:
+                            # Очищуємо параграф і записуємо нове значення
+                            new_text = p.text.replace(placeholder, str(v))
+                            p.text = "" 
+                            run = p.add_run(new_text)
+                            apply_font_style(run, 12)
 
 def fill_document_table(doc, items, vendor_info, is_fop, is_specification):
     target_table = None
