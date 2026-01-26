@@ -210,4 +210,15 @@ if items_to_generate:
                 
                 if it_fill:
                     actual_total = fill_document_table(doc, it_fill, is_fop, "Специфікація" in label)
-                    reps = {"vendor_name": v["full"], "customer": customer, "address": address
+                    reps = {"vendor_name": v["full"], "customer": customer, "address": address, "kp_num": kp_num, "date": date_str,
+                            "total_sum_digits": format_num(actual_total), "total_sum_words": amount_to_text_uk(actual_total)}
+                    replace_with_formatting(doc, reps)
+                    buf = BytesIO(); doc.save(buf); buf.seek(0)
+                    results[label] = {"name": f"{label}_{kp_num}.docx", "data": buf}
+        st.session_state.generated_files = results
+        st.rerun()
+
+if st.session_state.generated_files:
+    cols = st.columns(len(st.session_state.generated_files))
+    for i, (k, info) in enumerate(st.session_state.generated_files.items()):
+        cols[i].download_button(f"💾 {info['name']}", info['data'], info['name'])
