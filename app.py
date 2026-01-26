@@ -34,12 +34,8 @@ def format_num(n):
     return f"{precise_round(n):,.2f}".replace(",", " ").replace(".", ",")
 
 def calculate_row(price_from_st, qty, is_fop):
-    """Розрахунок: для ФОП додаємо 6% до ціни одиниці, для ТОВ лишаємо як є"""
-    if is_fop:
-        p_unit = precise_round(price_from_st * 1.06)
-    else:
-        p_unit = precise_round(price_from_st)
-    
+    # У таблиці ціна завжди чиста, податки рахуємо в підсумку
+    p_unit = precise_round(price_from_st)
     row_sum = precise_round(p_unit * qty)
     return p_unit, row_sum
 
@@ -172,7 +168,7 @@ def replace_with_formatting(doc, reps):
                             r = p.add_run(txt)
                             apply_font_style(r, 12)
 
-def fill_document_table(doc, items, tax_label, tax_rate, is_fop, label_name):
+def fill_document_table(doc, items, is_fop, label_name):
     target_table = None
     for tbl in doc.tables:
         if any("Найменування" in cell.text for cell in tbl.rows[0].cells):
@@ -180,7 +176,7 @@ def fill_document_table(doc, items, tax_label, tax_rate, is_fop, label_name):
             break
     if not target_table: return 0
 
-    grand_total = 0
+    total_no_tax = 0
     cols = len(target_table.columns)
     is_spec = "Специфікація" in label_name
 
@@ -193,15 +189,12 @@ def fill_document_table(doc, items, tax_label, tax_rate, is_fop, label_name):
     for cat_name, cat_items in categories.items():
         row_cat = target_table.add_row()
         row_cat.cells[0].merge(row_cat.cells[cols-1])
-        set_cell_style(row_cat.cells[0], cat_name, WD_ALIGN_PARAGRAPH.CENTER, bold=False, italic=True)
+        set_cell_style(row_cat.cells[0], cat_name, WD_ALIGN_PARAGRAPH.CENTER, italic=True)
         
         for it in cat_items:
-            # Для ФОП тут ціна вже буде +6%, для ТОВ - чиста ціна
             p_unit, row_sum = calculate_row(it['p'], it['qty'], is_fop)
-            grand_total += row_sum
-
+            total_no_tax += row_sum
             r = target_table.add_row()
-            r.allow_break_across_pages = False
             set_cell_style(r.cells[0], it['name'])
             if cols >= 4:
                 set_cell_style(r.cells[1], str(it['qty']), WD_ALIGN_PARAGRAPH.CENTER)
@@ -209,44 +202,28 @@ def fill_document_table(doc, items, tax_label, tax_rate, is_fop, label_name):
                 set_cell_style(r.cells[3], format_num(row_sum), WD_ALIGN_PARAGRAPH.RIGHT)
 
     # ЛОГІКА ПІДСУМКІВ
-    if is_fop:
-        if is_spec:
-            # ФОП Специфікація: тільки один рядок
-            r = target_table.add_row()
-            r.cells[0].merge(r.cells[cols-2])
-            set_cell_style(r.cells[0], "ЗАГАЛЬНА СУМА, грн:", WD_ALIGN_PARAGRAPH.LEFT, True)
-            set_cell_style(r.cells[cols-1], format_num(grand_total), WD_ALIGN_PARAGRAPH.RIGHT, True)
-        else:
-            # ФОП КП: три рядки (якщо ви хочете бачити деталізацію навантаження)
-            pure_fop = precise_round(grand_total / 1.06)
-            f_rows = [
-                ("РАЗОМ (без навантаження), грн:", pure_fop, False),
-                ("Податкове навантаження 6%:", grand_total - pure_fop, False),
-                ("ЗАГАЛЬНА СУМА, грн:", grand_total, True)
-            ]
-            for label, val, is_bold in f_rows:
-                r = target_table.add_row()
-                r.cells[0].merge(r.cells[cols-2])
-                set_cell_style(r.cells[0], label, WD_ALIGN_PARAGRAPH.LEFT, is_bold)
-                set_cell_style(r.cells[cols-1], format_num(val), WD_ALIGN_PARAGRAPH.RIGHT, is_bold)
+    tax_rate = 0.06 if is_fop else 0.20
+    tax_amount = precise_round(total_no_tax * tax_rate)
+    grand_total = precise_round(total_no_tax + tax_amount)
+
+    if is_fop and is_spec:
+        # Для специфікації ФОП тільки один рядок
+        r = target_table.add_row()
+        r.cells[0].merge(r.cells[cols-2])
+        set_cell_style(r.cells[0], "ЗАГАЛЬНА СУМА, грн:", WD_ALIGN_PARAGRAPH.LEFT, True)
+        set_cell_style(r.cells[cols-1], format_num(grand_total), WD_ALIGN_PARAGRAPH.RIGHT, True)
     else:
-        # ТОВ (КП та Специфікація): завжди три рядки з ПДВ
-        pure_tov = precise_round(grand_total)
-        tax_val = precise_round(pure_tov * 0.20)
-        final_tov = precise_round(pure_tov + tax_val)
+        # Для ТОВ (КП/Спец) та для ФОП (КП) - три рядки
+        sub_label = "РАЗОМ (без навантаження), грн:" if is_fop else "РАЗОМ (без ПДВ), грн:"
+        tax_label = "Податкове навантаження 6%:" if is_fop else "ПДВ (20%):"
+        total_label = "ЗАГАЛЬНА СУМА, грн:" if is_fop else "ЗАГАЛЬНА СУМА з ПДВ, грн:"
         
-        f_rows = [
-            ("РАЗОМ (без ПДВ), грн:", pure_tov, False),
-            ("ПДВ (20%):", tax_val, False),
-            ("ЗАГАЛЬНА СУМА з ПДВ, грн:", final_tov, True)
-        ]
-        for label, val, is_bold in f_rows:
+        f_rows = [(sub_label, total_no_tax, False), (tax_label, tax_amount, False), (total_label, grand_total, True)]
+        for lab, val, bld in f_rows:
             r = target_table.add_row()
             r.cells[0].merge(r.cells[cols-2])
-            set_cell_style(r.cells[0], label, WD_ALIGN_PARAGRAPH.LEFT, is_bold)
-            set_cell_style(r.cells[cols-1], format_num(val), WD_ALIGN_PARAGRAPH.RIGHT, is_bold)
-        
-        grand_total = final_tov # Повертаємо суму з ПДВ для пропису
+            set_cell_style(r.cells[0], lab, WD_ALIGN_PARAGRAPH.LEFT, bld)
+            set_cell_style(r.cells[cols-1], format_num(val), WD_ALIGN_PARAGRAPH.RIGHT, bld)
 
     return grand_total
 
@@ -258,7 +235,6 @@ st.set_page_config(page_title="Talo Generator", layout="wide")
 st.title("⚡ Генератор КП")
 
 EQUIPMENT_BASE = load_full_database_from_gsheets()
-
 if "generated_files" not in st.session_state: st.session_state.generated_files = None
 
 with st.expander("📌 Основні дані", expanded=True):
@@ -297,17 +273,25 @@ if EQUIPMENT_BASE:
                 items_to_generate.append({"name": name, "qty": q, "p": p, "cat": cat})
 
 if items_to_generate:
+    # ПРАВКА 2: ВИВЕДЕННЯ СУМИ НА СТРІМЛІТ
+    total_raw = sum(it['p'] * it['qty'] for it in items_to_generate)
+    tax_rate = 0.06 if is_fop else 0.20
+    tax_val = precise_round(total_raw * tax_rate)
+    final_sum = total_raw + tax_val
+    
+    st.markdown(f"""
+    <div style="background-color:#f0f2f6; padding:20px; border-radius:10px; border-left: 5px solid #ff4b4b;">
+        <h3 style="margin-top:0;">💰 Попередній розрахунок:</h3>
+        <p>Сума без податку: <b>{format_num(total_raw)} грн.</b></p>
+        <p>Податок ({'6%' if is_fop else '20%'}): <b>{format_num(tax_val)} грн.</b></p>
+        <h2 style="color:#ff4b4b;">РАЗОМ: {format_num(final_sum)} грн.</h2>
+    </div>
+    """, unsafe_allow_html=True)
+
     st.write("---")
     c_gen, c_tg = st.columns(2)
     
     if c_gen.button("📄 1. ЗГЕНЕРУВАТИ ДОКУМЕНТИ", use_container_width=True):
-        # Початковий розрахунок для реєстру
-        calc_total_for_registry = 0
-        for it in items_to_generate:
-            _, row_s = calculate_row(it['p'], it['qty'], is_fop)
-            calc_total_for_registry += row_s
-        if not is_fop: calc_total_for_registry = precise_round(calc_total_for_registry * 1.20)
-
         reps = {"vendor_name": v["full"], "vendor_address": v["adr"], "vendor_inn": v["inn"], "vendor_iban": v["iban"], 
                 "vendor_bank": v["bank"], "vendor_email": email, "vendor_short_name": v["short"], "customer": customer, 
                 "address": address, "kp_num": kp_num, "date": date_str, "manager": manager, "phone": phone, "email": email,
@@ -315,7 +299,7 @@ if items_to_generate:
         
         try:
             creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"])
-            gspread.authorize(creds).open("Реєстр КП Talo").get_worksheet(0).append_row([date_str, kp_num, customer, address, vendor_choice, calc_total_for_registry, manager])
+            gspread.authorize(creds).open("Реєстр КП Talo").get_worksheet(0).append_row([date_str, kp_num, customer, address, vendor_choice, final_sum, manager])
         except: pass
 
         results = {}
@@ -330,7 +314,7 @@ if items_to_generate:
                 if "РОБ" in label: it_fill = [i for i in items_to_generate if "роботи" in i["cat"].lower()]
                 
                 if it_fill:
-                    actual_total = fill_document_table(doc, it_fill, v['tax_label'], v['tax_rate'], is_fop, label)
+                    actual_total = fill_document_table(doc, it_fill, is_fop, label)
                     reps["total_sum_digits"] = format_num(actual_total)
                     reps["total_sum_words"] = amount_to_text_uk(actual_total)
                     replace_with_formatting(doc, reps)
