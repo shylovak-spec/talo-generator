@@ -33,7 +33,7 @@ def format_num(n):
     return f"{precise_round(n):,.2f}".replace(",", " ").replace(".", ",")
 
 def calculate_row(price_from_st, qty, is_fop, is_spec):
-    # ПРАВКА: Для специфікації ФОП ціна одиниці множиться на 1.06
+    # Для Специфікації ФОП ціна одиниці одразу збільшується на 6%
     if is_fop and is_spec:
         p_unit = precise_round(price_from_st * 1.06)
     else:
@@ -124,7 +124,7 @@ def fill_document_table(doc, items, is_fop, label_name):
             break
     if not target_table: return 0
 
-    total_sum_for_bottom = 0
+    total_sum_acc = 0
     cols = len(target_table.columns)
     is_spec = "Специфікація" in label_name
 
@@ -140,9 +140,9 @@ def fill_document_table(doc, items, is_fop, label_name):
         set_cell_style(row_cat.cells[0], cat_name, WD_ALIGN_PARAGRAPH.CENTER, italic=True)
         
         for it in cat_items:
-            # Для Специфікації ФОП ціна вже включає 6%
+            # Тут використовується is_spec для визначення, чи множити на 1.06
             p_unit, row_sum = calculate_row(it['p'], it['qty'], is_fop, is_spec)
-            total_sum_for_bottom += row_sum
+            total_sum_acc += row_sum
             r = target_table.add_row()
             set_cell_style(r.cells[0], it['name'])
             if cols >= 4:
@@ -151,29 +151,35 @@ def fill_document_table(doc, items, is_fop, label_name):
                 set_cell_style(r.cells[3], format_num(row_sum), WD_ALIGN_PARAGRAPH.RIGHT)
 
     if is_fop and is_spec:
-        # ПОВЕРНЕННЯ: Специфікація ФОП - один рядок
+        # Логіка з останнього робочого коду для специфікацій ФОП (один рядок)
         r = target_table.add_row()
         r.cells[0].merge(r.cells[cols-2])
         set_cell_style(r.cells[0], "ЗАГАЛЬНА СУМА, грн:", WD_ALIGN_PARAGRAPH.LEFT, True)
-        set_cell_style(r.cells[cols-1], format_num(total_sum_for_bottom), WD_ALIGN_PARAGRAPH.RIGHT, True)
-        return total_sum_for_bottom
+        set_cell_style(r.cells[cols-1], format_num(total_sum_acc), WD_ALIGN_PARAGRAPH.RIGHT, True)
+        return total_sum_acc
     else:
-        # КП ФОП або ТОВ (будь-що) - три рядки
+        # Для КП (ФОП або ТОВ) та Специфікацій ТОВ - розгорнутий підсумок
         tax_rate = 0.06 if is_fop else 0.20
-        # Якщо це КП ФОП, ми рахували total_sum_for_bottom на чистих цінах. Додаємо податок.
-        tax_amount = precise_round(total_sum_for_bottom * tax_rate)
-        grand_total = precise_round(total_sum_for_bottom + tax_amount)
+        # Для ТОВ розраховуємо базу від загальної суми, для КП ФОП додаємо 6% зверху до чистої бази
+        if not is_fop:
+            pure = precise_round(total_sum_acc / (1 + tax_rate))
+            tax_val = total_sum_acc - pure
+            grand = total_sum_acc
+        else:
+            pure = total_sum_acc
+            tax_val = precise_round(pure * tax_rate)
+            grand = precise_round(pure + tax_val)
 
         sub_label = "РАЗОМ (без навантаження), грн:" if is_fop else "РАЗОМ (без ПДВ), грн:"
         tax_label = "Податкове навантаження 6%:" if is_fop else "ПДВ (20%):"
         total_label = "ЗАГАЛЬНА СУМА, грн:" if is_fop else "ЗАГАЛЬНА СУМА з ПДВ, грн:"
         
-        for lab, val, bld in [(sub_label, total_sum_for_bottom, False), (tax_label, tax_amount, False), (total_label, grand_total, True)]:
+        for lab, val, bld in [(sub_label, pure, False), (tax_label, tax_val, False), (total_label, grand, True)]:
             r = target_table.add_row()
             r.cells[0].merge(r.cells[cols-2])
             set_cell_style(r.cells[0], lab, WD_ALIGN_PARAGRAPH.LEFT, bld)
             set_cell_style(r.cells[cols-1], format_num(val), WD_ALIGN_PARAGRAPH.RIGHT, bld)
-        return grand_total
+        return grand
 
 # ==============================================================================
 # 3. STREAMLIT ІНТЕРФЕЙС
@@ -210,24 +216,24 @@ if EQUIPMENT_BASE:
                 cn, cq, cp = st.columns([4, 1, 2])
                 cn.write(f"**{name}**")
                 q = cq.number_input("К-сть", 1, 500, 1, key=f"qty_{cat}_{name}")
-                p = cp.number_input("Ціна (чиста)", 0.0, 1000000.0, float(base_p), key=f"prc_{cat}_{name}")
+                p = cp.number_input("Ціна (базова)", 0.0, 1000000.0, float(base_p), key=f"prc_{cat}_{name}")
                 items_to_generate.append({"name": name, "qty": q, "p": p, "cat": cat})
 
 if items_to_generate:
-    # ВИВЕДЕННЯ СУМИ
-    total_pure = sum(it['p'] * it['qty'] for it in items_to_generate)
+    # ВИВЕДЕННЯ СУМИ НА СТРІМЛІТ
+    total_raw = sum(it['p'] * it['qty'] for it in items_to_generate)
     tax_rate = 0.06 if is_fop else 0.20
-    tax_val = precise_round(total_pure * tax_rate)
-    total_with_tax = total_pure + tax_val
+    tax_val = precise_round(total_raw * tax_rate)
+    final_sum = total_raw + tax_val
     
-    c_info1, c_info2 = st.columns(2)
-    with c_info1:
-        st.info(f"**Для КП ({'6%' if is_fop else '20%'} ПДВ):**\n\nРазом: {format_num(total_with_tax)} грн.")
-    with c_info2:
-        if is_fop:
-            st.success(f"**Для Специфікації (ціна + 6%):**\n\nРазом: {format_num(total_with_tax)} грн.")
-        else:
-            st.success(f"**Для ТОВ (ПДВ):**\n\nРазом: {format_num(total_with_tax)} грн.")
+    st.markdown(f"""
+    <div style="background-color:#f0f2f6; padding:20px; border-radius:10px; border-left: 5px solid #ff4b4b; margin-bottom:20px;">
+        <h3 style="margin-top:0;">💰 Попередній розрахунок (Разом):</h3>
+        <p style="margin-bottom:5px;">Чиста сума: <b>{format_num(total_raw)} грн.</b></p>
+        <p style="margin-bottom:5px;">Податок ({'6%' if is_fop else '20%'}): <b>{format_num(tax_val)} грн.</b></p>
+        <h2 style="color:#ff4b4b; margin-top:10px;">ЗАГАЛОМ: {format_num(final_sum)} грн.</h2>
+    </div>
+    """, unsafe_allow_html=True)
 
     if st.button("📄 ЗГЕНЕРУВАТИ ДОКУМЕНТИ", use_container_width=True):
         reps = {"vendor_name": v["full"], "vendor_address": v["adr"], "vendor_inn": v["inn"], "vendor_iban": v["iban"], 
