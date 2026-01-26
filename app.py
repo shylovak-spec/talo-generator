@@ -164,7 +164,7 @@ def fill_document_table(doc, items, is_fop, label_name):
         tax_amount = precise_round(total_sum_for_bottom * tax_rate)
         grand_total = precise_round(total_sum_for_bottom + tax_amount)
 
-        sub_label = "РАЗОМ, грн:" if is_fop else "РАЗОМ, грн:"
+        sub_label = "РАЗОМ (без навантаження), грн:" if is_fop else "РАЗОМ (без ПДВ), грн:"
         tax_label = "Податкове навантаження 6%:" if is_fop else "ПДВ (20%):"
         total_label = "ЗАГАЛЬНА СУМА, грн:" if is_fop else "ЗАГАЛЬНА СУМА з ПДВ, грн:"
         
