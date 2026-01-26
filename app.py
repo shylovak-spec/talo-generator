@@ -8,7 +8,6 @@ from docx.oxml.ns import qn
 from io import BytesIO
 import datetime
 import os
-import re
 from decimal import Decimal, ROUND_HALF_UP
 
 # Спроба імпорту num2words
@@ -72,9 +71,9 @@ def load_full_database_from_gsheets():
         return {}
 
 VENDORS = {
-    "ТОВ «ТАЛО»": {"full": "ТОВ «ТАЛО»", "short": "Олексій КРАМАРЕНКО", "inn": "32670939", "adr": "03113, м. Київ, проспект Перемоги, будинок 68/1 офіс 62", "iban": "UA_________________________", "bank": "АТ «УКРСИББАНК»", "tax_label": "ПДВ (20%)", "tax_rate": 0.20},
-    "ФОП Крамаренко Олексій Сергійович": {"full": "ФОП Крамаренко Олексій Сергійович", "short": "Олексій КРАМАРЕНКО", "inn": "3048920896", "adr": "02156 м. Київ, вул. Кіото 9, кв. 40", "iban": "UA423348510000000026009261015", "bank": "АТ «ПУМБ»", "tax_label": "Податкове навантаження (6%)", "tax_rate": 0.06},
-    "ФОП Шилова Ксенія Вікторівна": {"full": "ФОП Шилова Ксенія Вікторівна", "short": "Ксенія ШИЛОВА", "inn": "3237308989", "adr": "20901 м. Чигирин, вул. Миру 4, кв. 43", "iban": "UA433220010000026007350102344", "bank": "АТ УНІВЕРСАЛ БАНК", "tax_label": "Податкове навантаження (6%)", "tax_rate": 0.06}
+    "ТОВ «ТАЛО»": {"full": "ТОВ «ТАЛО»", "short": "Олексій КРАМАРЕНКО", "inn": "32670939", "adr": "03113, м. Київ, проспект Перемоги, будинок 68/1 офіс 62", "iban": "UA_________________________", "bank": "АТ «УКРСИББАНК»", "tax_label": "ПДВ (20%)", "tax_rate": 0.20, "email": "o.kramarenko@talo.com.ua"},
+    "ФОП Крамаренко Олексій Сергійович": {"full": "ФОП Крамаренко Олексій Сергійович", "short": "Олексій КРАМАРЕНКО", "inn": "3048920896", "adr": "02156 м. Київ, вул. Кіото 9, кв. 40", "iban": "UA423348510000000026009261015", "bank": "АТ «ПУМБ»", "tax_label": "Податкове навантаження (6%)", "tax_rate": 0.06, "email": "o.kramarenko@talo.com.ua"},
+    "ФОП Шилова Ксенія Вікторівна": {"full": "ФОП Шилова Ксенія Вікторівна", "short": "Ксенія ШИЛОВА", "inn": "3237308989", "adr": "20901 м. Чигирин, вул. Миру 4, кв. 43", "iban": "UA433220010000026007350102344", "bank": "АТ УНІВЕРСАЛ БАНК", "tax_label": "Податкове навантаження (6%)", "tax_rate": 0.06, "email": "x.shylova@talo.com.ua"}
 }
 
 # ==============================================================================
@@ -89,30 +88,39 @@ def apply_font_style(run, size=12, bold=False):
     r.get_or_add_rFonts().set(qn('w:ascii'), 'Times New Roman')
     r.get_or_add_rFonts().set(qn('w:hAnsi'), 'Times New Roman')
 
-def replace_in_paragraph(p, reps):
-    """Шукає теги в параграфі та зберігає жирний шрифт до двокрапки."""
+def replace_text_in_paragraph(p, reps):
+    """Обробляє один параграф: заміна тегів з дотриманням жирного шрифту до двокрапки."""
+    original_text = p.text
+    changed = False
+    new_text = original_text
+    
     for k, v in reps.items():
         placeholder = f"{{{{{k}}}}}"
-        if placeholder in p.text:
-            new_text = p.text.replace(placeholder, str(v))
-            p.text = ""
-            if ":" in new_text:
-                parts = new_text.split(":", 1)
-                apply_font_style(p.add_run(parts[0] + ":"), 12, bold=True)
-                apply_font_style(p.add_run(parts[1]), 12, bold=False)
-            else:
-                apply_font_style(p.add_run(new_text), 12, bold=False)
+        if placeholder in new_text:
+            new_text = new_text.replace(placeholder, str(v))
+            changed = True
+    
+    if changed:
+        p.text = ""
+        if ":" in new_text:
+            parts = new_text.split(":", 1)
+            apply_font_style(p.add_run(parts[0] + ":"), 12, bold=True)
+            apply_font_style(p.add_run(parts[1]), 12, bold=False)
+        else:
+            apply_font_style(p.add_run(new_text), 12, bold=False)
 
 def replace_with_formatting(doc, reps):
-    # У звичайному тексті
+    """Проходить по всьому документу, включаючи ТАБЛИЦІ."""
+    # 1. Текст поза таблицями
     for p in doc.paragraphs:
-        replace_in_paragraph(p, reps)
-    # У ВСІХ таблицях (для специфікацій та шапок)
+        replace_text_in_paragraph(p, reps)
+    
+    # 2. Текст у кожній клітинці кожної таблиці
     for tbl in doc.tables:
         for row in tbl.rows:
             for cell in row.cells:
                 for p in cell.paragraphs:
-                    replace_in_paragraph(p, reps)
+                    replace_text_in_paragraph(p, reps)
 
 def set_cell_style(cell, text, align=WD_ALIGN_PARAGRAPH.LEFT, bold=False):
     cell.text = ""
@@ -144,6 +152,7 @@ def fill_document_table(doc, items, vendor_info, is_fop, is_specification):
         set_cell_style(row_cat.cells[0], cat_name, WD_ALIGN_PARAGRAPH.CENTER, bold=True)
         
         for it in cat_items:
+            # Логіка розрахунку: Специфікація ФОП отримує +6% у рядок
             p_unit = precise_round(it['p'] * 1.06) if (is_fop and is_specification) else precise_round(it['p'])
             row_sum = precise_round(p_unit * it['qty'])
             total_pure += precise_round(it['p'] * it['qty'])
@@ -192,11 +201,9 @@ with st.expander("📌 Основні дані", expanded=True):
     manager = c2.text_input("Відповідальний", "Олексій Крамаренко")
     date_str = c2.date_input("Дата", datetime.date.today()).strftime("%d.%m.%Y")
     phone = c2.text_input("Телефон", "+380 (67) 477-17-18")
-    email = c2.text_input("E-mail", "o.kramarenko@talo.com.ua")
+    email = c2.text_input("E-mail", v["email"])
 
 txt_intro = st.text_area("Вступний текст", "Відповідно до наданих даних пропонуємо наступне:")
-tc1, tc2, tc3 = st.columns(3)
-l1, l2, l3 = tc1.text_input("Пункт 1", "Автономне живлення ліфтів"), tc2.text_input("Пункт 2", "Автономне живлення насосної"), tc3.text_input("Пункт 3", "Аварійне освітлення")
 
 items_to_generate = []
 if EQUIPMENT_BASE:
@@ -213,10 +220,33 @@ if EQUIPMENT_BASE:
                 items_to_generate.append({"name": name, "qty": q, "p": p, "cat": cat})
 
 if items_to_generate:
+    # Розрахунок для прев'ю
+    temp_total_pure = sum(it['p'] * it['qty'] for it in items_to_generate)
+    temp_tax = temp_total_pure * v['tax_rate']
+    temp_grand_total = temp_total_pure + temp_tax
+    
+    st.info(f"💰 **Загальна сума до сплати ({vendor_choice}): {format_num(temp_grand_total)} грн.**")
+    
     if st.button("📄 ЗГЕНЕРУВАТИ ДОКУМЕНТИ", use_container_width=True):
-        reps = {"vendor_name": v["full"], "vendor_address": v["adr"], "vendor_inn": v["inn"], "vendor_iban": v["iban"], 
-                "vendor_bank": v["bank"], "customer": customer, "address": address, "kp_num": kp_num, "date": date_str, 
-                "manager": manager, "phone": phone, "email": email, "txt_intro": txt_intro, "line1": l1, "line2": l2, "line3": l3}
+        # Додаємо всі можливі варіанти тегів, які можуть бути в шаблонах
+        reps = {
+            "vendor_name": v["full"], 
+            "vendor_address": v["adr"], 
+            "vendor_inn": v["inn"], 
+            "vendor_iban": v["iban"], 
+            "vendor_bank": v["bank"], 
+            "vendor_email": v["email"],
+            "customer": customer, 
+            "address": address, 
+            "kp_num": kp_num, 
+            "spec_id_roboti": kp_num, # Тег зі скріншота
+            "spec_id_postavka": kp_num,
+            "date": date_str, 
+            "manager": manager, 
+            "phone": phone, 
+            "email": email, 
+            "txt_intro": txt_intro
+        }
         
         results = {}
         file_map = {"КП": "template.docx", "Специфікація_ОБЛ": "template_postavka.docx", "Специфікація_РОБ": "template_roboti.docx"}
@@ -232,11 +262,19 @@ if items_to_generate:
                     final_sum = fill_document_table(doc, it_fill, v, is_fop, "Специфікація" in label)
                     reps["total_sum_digits"] = format_num(final_sum)
                     reps["total_sum_words"] = amount_to_text_uk(final_sum)
+                    
                     replace_with_formatting(doc, reps)
                     
                     buf = BytesIO()
                     doc.save(buf); buf.seek(0)
-                    results[label] = {"name": f"{label}_{kp_num}.docx", "data": buf}
+                    
+                    # ПРАВКА ТУТ: Нове формування назви для КП
+                    if label == "КП":
+                        filename = f"КП_{kp_num}_{address}.docx"
+                    else:
+                        filename = f"{label}_{kp_num}.docx"
+                        
+                    results[label] = {"name": filename, "data": buf}
         st.session_state.generated_files = results
 
 if st.session_state.generated_files:
