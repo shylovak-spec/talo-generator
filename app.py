@@ -26,28 +26,32 @@ TPL_DIR = ""
 # 1. ТЕХНІЧНІ ФУНКЦІЇ
 # ==============================================================================
 
+def parse_price(val):
+    """Очищає рядок від сміття та конвертує в число. Якщо порожньо — дає 0.0"""
+    try:
+        if val is None: return 0.0
+        # Прибираємо пробіли (звичайні та нерозривні \xa0)
+        s = str(val).strip().replace(" ", "").replace("\xa0", "")
+        # Міняємо кому на крапку
+        s = s.replace(",", ".")
+        if not s: return 0.0
+        return float(s)
+    except (ValueError, TypeError):
+        return 0.0
+
 def precise_round(number):
     return float(Decimal(str(number)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
 def format_num(n):
     return f"{precise_round(n):,.2f}".replace(",", " ").replace(".", ",")
 
-def amount_to_text_uk(amount):
-    val = precise_round(amount)
-    grn = int(val)
-    kop = int(round((val - grn) * 100))
-    if num2words is None:
-        return f"{format_num(val)} грн."
-    try:
-        words = num2words(grn, lang='uk').capitalize()
-        return f"{words} гривень, {kop:02d} коп."
-    except:
-        return f"{format_num(val)} грн."
-
 @st.cache_data(ttl=3600)
 def load_full_database_from_gsheets():
     try:
-        if "gcp_service_account" not in st.secrets: return {}
+        if "gcp_service_account" not in st.secrets: 
+            st.error("Ключі gcp_service_account не знайдені в Secrets!")
+            return {}
+            
         creds = Credentials.from_service_account_info(
             st.secrets["gcp_service_account"], 
             scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
@@ -55,12 +59,19 @@ def load_full_database_from_gsheets():
         gc = gspread.authorize(creds)
         sh = gc.open("База_Товарів")
         full_base = {}
+        
         for sheet in sh.worksheets():
+            # Отримуємо всі дані з листа
             data = sheet.get_all_records()
-            items_in_cat = {str(row.get('Назва', '')).strip(): 
-                            float(str(row.get('Ціна', '0')).replace(" ", "").replace(",", ".")) 
-                            for row in data if row.get('Назва')}
-            if items_in_cat: full_base[sheet.title] = items_in_cat
+            items_in_cat = {}
+            for row in data:
+                name = str(row.get('Назва', '')).strip()
+                if name:  # Якщо назва не порожня — беремо товар
+                    # Використовуємо нашу нову функцію очищення ціни
+                    items_in_cat[name] = parse_price(row.get('Ціна', 0))
+            
+            if items_in_cat: 
+                full_base[sheet.title] = items_in_cat
         return full_base
     except Exception as e:
         st.sidebar.error(f"⚠️ Помилка бази: {e}")
