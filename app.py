@@ -14,7 +14,7 @@ import requests
 import tempfile
 from decimal import Decimal, ROUND_HALF_UP
 
-# Спроба імпорту num2words
+# Спроба імпорту num2words для суми прописом
 try:
     from num2words import num2words
 except ImportError:
@@ -23,20 +23,16 @@ except ImportError:
 TPL_DIR = "" 
 
 # ==============================================================================
-# 1. ТЕХНІЧНІ ФУНКЦІЇ
+# 1. ТЕХНІЧНІ ФУНКЦІЇ (ОЧИЩЕННЯ ТА РОЗРАХУНОК)
 # ==============================================================================
 
 def parse_price(val):
-    """Очищає рядок від сміття та конвертує в число. Якщо порожньо — дає 0.0"""
+    """Очищає значення ціни з таблиці від сміття."""
     try:
-        if val is None: return 0.0
-        # Прибираємо пробіли (звичайні та нерозривні \xa0)
-        s = str(val).strip().replace(" ", "").replace("\xa0", "")
-        # Міняємо кому на крапку
-        s = s.replace(",", ".")
-        if not s: return 0.0
+        if val is None or val == "": return 0.0
+        s = str(val).strip().replace(" ", "").replace("\xa0", "").replace(",", ".")
         return float(s)
-    except (ValueError, TypeError):
+    except:
         return 0.0
 
 def precise_round(number):
@@ -45,13 +41,23 @@ def precise_round(number):
 def format_num(n):
     return f"{precise_round(n):,.2f}".replace(",", " ").replace(".", ",")
 
+def amount_to_text_uk(amount):
+    """Генерує суму прописом."""
+    val = precise_round(amount)
+    grn = int(val)
+    kop = int(round((val - grn) * 100))
+    if num2words is None:
+        return f"{format_num(val)} грн."
+    try:
+        words = num2words(grn, lang='uk').capitalize()
+        return f"{words} гривень, {kop:02d} коп."
+    except:
+        return f"{format_num(val)} грн."
+
 @st.cache_data(ttl=3600)
 def load_full_database_from_gsheets():
     try:
-        if "gcp_service_account" not in st.secrets: 
-            st.error("Ключі gcp_service_account не знайдені в Secrets!")
-            return {}
-            
+        if "gcp_service_account" not in st.secrets: return {}
         creds = Credentials.from_service_account_info(
             st.secrets["gcp_service_account"], 
             scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
@@ -59,19 +65,14 @@ def load_full_database_from_gsheets():
         gc = gspread.authorize(creds)
         sh = gc.open("База_Товарів")
         full_base = {}
-        
         for sheet in sh.worksheets():
-            # Отримуємо всі дані з листа
             data = sheet.get_all_records()
             items_in_cat = {}
             for row in data:
                 name = str(row.get('Назва', '')).strip()
-                if name:  # Якщо назва не порожня — беремо товар
-                    # Використовуємо нашу нову функцію очищення ціни
+                if name:
                     items_in_cat[name] = parse_price(row.get('Ціна', 0))
-            
-            if items_in_cat: 
-                full_base[sheet.title] = items_in_cat
+            if items_in_cat: full_base[sheet.title] = items_in_cat
         return full_base
     except Exception as e:
         st.sidebar.error(f"⚠️ Помилка бази: {e}")
@@ -84,7 +85,7 @@ VENDORS = {
 }
 
 # ==============================================================================
-# 2. ФОРМАТУВАННЯ ТА ЗАМІНА
+# 2. ФОРМАТУВАННЯ ТА ЗАПОВНЕННЯ DOCX
 # ==============================================================================
 
 def apply_font_style(run, size=12, bold=False, italic=False):
@@ -116,7 +117,7 @@ def replace_with_formatting(doc, reps):
                 else:
                     apply_font_style(p.add_run(full_text), 12)
 
-def fill_document_table(doc, items, vendor_info, is_fop, is_specification=False):
+def fill_document_table(doc, items, vendor_info, is_fop, is_specification):
     target_table = None
     for tbl in doc.tables:
         if any("Найменування" in cell.text for cell in tbl.rows[0].cells):
@@ -124,10 +125,9 @@ def fill_document_table(doc, items, vendor_info, is_fop, is_specification=False)
     if not target_table: return 0
 
     cols = len(target_table.columns)
-    grand_total = 0
-    subtotal_pure = 0
+    total_pure = 0
 
-    # Групування
+    # Групування за категоріями
     categories = {}
     for it in items:
         cat = it['cat'].upper()
@@ -140,55 +140,52 @@ def fill_document_table(doc, items, vendor_info, is_fop, is_specification=False)
         set_cell_style(row_cat.cells[0], cat_name, WD_ALIGN_PARAGRAPH.CENTER, italic=True)
         
         for it in cat_items:
-            # ЛОГІКА ЦІНИ РЯДКА
+            # ЛОГІКА ЦІНИ ДЛЯ РЯДКА
             if is_fop and is_specification:
-                # Для специфікації ФОП ціна в рядку вже +6%
-                p_unit = precise_round(it['p'] * 1.06)
+                p_unit = precise_round(it['p'] * 1.06) # У специфікації ФОП ціна вже +6%
             else:
-                # Для ТОВ та КП ФОП ціна в рядку чиста
-                p_unit = precise_round(it['p'])
+                p_unit = precise_round(it['p']) # Для ТОВ та КП ФОП ціна чиста
             
             row_sum = precise_round(p_unit * it['qty'])
-            subtotal_pure += precise_round(it['p'] * it['qty']) # Чиста сума для футера ТОВ/ФОП-КП
-            grand_total += row_sum
-
+            total_pure += precise_round(it['p'] * it['qty']) # Сума без податків для підсумків
+            
             r = target_table.add_row()
             set_cell_style(r.cells[0], it['name'])
             set_cell_style(r.cells[1], str(it['qty']), WD_ALIGN_PARAGRAPH.CENTER)
             set_cell_style(r.cells[2], format_num(p_unit), WD_ALIGN_PARAGRAPH.RIGHT)
             set_cell_style(r.cells[3], format_num(row_sum), WD_ALIGN_PARAGRAPH.RIGHT)
 
-    # ПІДСУМКИ (ФУТЕР)
-    st_rate = vendor_info['tax_rate']
-    st_label = vendor_info['tax_label']
+    # ПІДСУМКИ ВНИЗУ ТАБЛИЦІ
+    tax_rate = vendor_info['tax_rate']
+    tax_label = vendor_info['tax_label']
 
     if is_fop and is_specification:
-        # Специфікація ФОП: тільки одна строка
+        # Для Специфікації ФОП тільки один рядок (податок уже в цінах)
+        final_total = precise_round(total_pure * 1.06)
         r = target_table.add_row()
         r.cells[0].merge(r.cells[cols-2])
         set_cell_style(r.cells[0], "ЗАГАЛЬНА СУМА, грн:", WD_ALIGN_PARAGRAPH.LEFT, True)
-        set_cell_style(r.cells[cols-1], format_num(grand_total), WD_ALIGN_PARAGRAPH.RIGHT, True)
+        set_cell_style(r.cells[cols-1], format_num(final_total), WD_ALIGN_PARAGRAPH.RIGHT, True)
     else:
-        # ТОВ або КП ФОП: Разом -> Податок -> Загальна
-        tax_amount = precise_round(subtotal_pure * st_rate)
-        final_sum = precise_round(subtotal_pure + tax_amount)
+        # Для ТОВ та КП ФОП: Разом -> Податок -> Всього
+        tax_val = precise_round(total_pure * tax_rate)
+        final_total = precise_round(total_pure + tax_val)
         
-        footer_rows = [
-            ("РАЗОМ, грн:", subtotal_pure, False),
-            (f"{st_label}, грн:", tax_amount, False),
-            ("ЗАГАЛЬНА СУМА, грн:", final_sum, True)
+        f_rows = [
+            ("РАЗОМ, грн:", total_pure, False),
+            (f"{tax_label}, грн:", tax_val, False),
+            ("ЗАГАЛЬНА СУМА, грн:", final_total, True)
         ]
-        for lbl, val, bold in footer_rows:
+        for lbl, val, bld in f_rows:
             r = target_table.add_row()
             r.cells[0].merge(r.cells[cols-2])
-            set_cell_style(r.cells[0], lbl, WD_ALIGN_PARAGRAPH.LEFT, bold)
-            set_cell_style(r.cells[cols-1], format_num(val), WD_ALIGN_PARAGRAPH.RIGHT, bold)
-        grand_total = final_sum
-
-    return grand_total
+            set_cell_style(r.cells[0], lbl, WD_ALIGN_PARAGRAPH.LEFT, bld)
+            set_cell_style(r.cells[cols-1], format_num(val), WD_ALIGN_PARAGRAPH.RIGHT, bld)
+            
+    return final_total
 
 # ==============================================================================
-# 4. ІНТЕРФЕЙС STREAMLIT
+# 3. ІНТЕРФЕЙС STREAMLIT
 # ==============================================================================
 
 st.set_page_config(page_title="Talo Generator", layout="wide")
@@ -203,15 +200,15 @@ with st.expander("📌 Основні дані", expanded=True):
     is_fop = "ФОП" in vendor_choice
     v = VENDORS[vendor_choice]
     customer = c1.text_input("Замовник", "ОСББ")
-    address = c1.text_input("Адреса об'єкта", "м. Київ")
-    kp_num = c2.text_input("Номер КП", "1223.25")
+    address = c1.text_input("Адреса", "м. Київ")
+    kp_num = c2.text_input("Номер КП", "0001")
     manager = c2.text_input("Відповідальний", "Олексій Крамаренко")
     date_str = c2.date_input("Дата", datetime.date.today()).strftime("%d.%m.%Y")
     phone = c2.text_input("Телефон", "+380 (67) 477-17-18")
     email = c2.text_input("E-mail", "o.kramarenko@talo.com.ua")
 
-st.subheader("📝 Текст")
-txt_intro = st.text_area("Вступ", "Відповідно до наданих даних пропонуємо наступне:")
+st.subheader("📝 Текст для КП")
+txt_intro = st.text_area("Вступний текст", "Відповідно до наданих даних пропонуємо наступне:")
 tc1, tc2, tc3 = st.columns(3)
 l1 = tc1.text_input("Пункт 1", "Автономне живлення ліфтів")
 l2 = tc2.text_input("Пункт 2", "Автономне живлення насосної")
@@ -224,28 +221,26 @@ if EQUIPMENT_BASE:
     tabs = st.tabs(list(EQUIPMENT_BASE.keys()))
     for i, cat in enumerate(EQUIPMENT_BASE.keys()):
         with tabs[i]:
-            sel = st.multiselect(f"Товари з {cat}:", list(EQUIPMENT_BASE[cat].keys()), key=f"ms_{cat}")
+            sel = st.multiselect(f"Додати з {cat}:", list(EQUIPMENT_BASE[cat].keys()), key=f"ms_{cat}")
             for name in sel:
                 base_p = EQUIPMENT_BASE[cat][name]
                 cn, cq, cp = st.columns([4, 1, 2])
                 cn.write(f"**{name}**")
                 q = cq.number_input("К-сть", 1, 500, 1, key=f"qty_{cat}_{name}")
-                p = cp.number_input("Ціна за од. (з бази)", 0.0, 1000000.0, float(base_p), key=f"prc_{cat}_{name}")
+                p = cp.number_input("Ціна за од.", 0.0, 1000000.0, float(base_p), key=f"prc_{cat}_{name}")
                 items_to_generate.append({"name": name, "qty": q, "p": p, "cat": cat})
 
-# --- БЛОК ВІДОБРАЖЕННЯ ЗАГАЛЬНОЇ СУМИ ТА КНОПОК ---
+# ВІДОБРАЖЕННЯ ЗАГАЛЬНОЇ СУМИ В РЕАЛЬНОМУ ЧАСІ
 if items_to_generate:
-    # РОЗРАХУНОК ДЛЯ ПРЕВ'Ю (Streamlit)
-    live_subtotal = sum(it['p'] * it['qty'] for it in items_to_generate)
-    live_tax = live_subtotal * v['tax_rate']
-    live_total = live_subtotal + live_tax
-
+    sub_total = sum(it['p'] * it['qty'] for it in items_to_generate)
+    tax_total = sub_total * v['tax_rate']
+    grand_total = sub_total + tax_total
+    
     st.markdown(f"""
-    <div style="background-color:#f0f2f6; padding:20px; border-radius:10px; border-left: 5px solid #ff4b4b; margin: 20px 0;">
-        <h3 style="margin:0;">💰 Попередній розрахунок:</h3>
-        <p style="font-size:18px; margin:5px 0;">Чиста сума: <b>{format_num(live_subtotal)} грн.</b></p>
-        <p style="font-size:18px; margin:5px 0;">{v['tax_label']}: <b>{format_num(live_tax)} грн.</b></p>
-        <h2 style="color:#ff4b4b; margin:10px 0;">ЗАГАЛОМ: {format_num(live_total)} грн.</h2>
+    <div style="background-color:#f8f9fa; padding:15px; border-radius:10px; border-left: 5px solid #2ecc71; margin: 20px 0;">
+        <p style="margin:0; font-size:14px;">Попередній розрахунок ({vendor_choice}):</p>
+        <h2 style="margin:5px 0; color:#2c3e50;">{format_num(grand_total)} грн.</h2>
+        <p style="margin:0; font-size:12px; color:#7f8c8d;">У т.ч. {v['tax_label']}: {format_num(tax_total)} грн.</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -261,20 +256,18 @@ if items_to_generate:
         clean_addr = re.sub(r'[^\w\s-]', '', address).replace(' ', '_')[:30]
 
         for label, tpl_name in file_map.items():
-            full_path = f"{TPL_DIR}{tpl_name}"
-            if os.path.exists(full_path):
-                doc = Document(full_path)
+            if os.path.exists(tpl_name):
+                doc = Document(tpl_name)
                 it_fill = items_to_generate
                 if "ОБЛ" in label: it_fill = [i for i in items_to_generate if "роботи" not in i["cat"].lower()]
                 if "РОБ" in label: it_fill = [i for i in items_to_generate if "роботи" in i["cat"].lower()]
                 
                 if it_fill:
-                    # Чи це специфікація (для особливої логіки ФОП)
                     is_spec = "Специфікація" in label
-                    actual_total = fill_document_table(doc, it_fill, v, is_fop, is_spec)
+                    final_sum = fill_document_table(doc, it_fill, v, is_fop, is_spec)
                     
-                    reps["total_sum_digits"] = format_num(actual_total)
-                    reps["total_sum_words"] = amount_to_text_uk(actual_total)
+                    reps["total_sum_digits"] = format_num(final_sum)
+                    reps["total_sum_words"] = amount_to_text_uk(final_sum)
                     replace_with_formatting(doc, reps)
                     
                     buf = BytesIO()
@@ -284,10 +277,8 @@ if items_to_generate:
         st.session_state.generated_files = results
         st.rerun()
 
-    if st.session_state.generated_files:
-        st.write("---")
-        cols = st.columns(len(st.session_state.generated_files))
-        for i, (k, info) in enumerate(st.session_state.generated_files.items()):
-            cols[i].download_button(f"💾 {info['name']}", info['data'], info['name'])
-else:
-    st.info("💡 Оберіть товари у вкладках вище, щоб з'явилися кнопки розрахунку.")
+if st.session_state.generated_files:
+    st.write("---")
+    cols = st.columns(len(st.session_state.generated_files))
+    for i, (k, info) in enumerate(st.session_state.generated_files.items()):
+        cols[i].download_button(f"💾 {info['name']}", info['data'], info['name'])
