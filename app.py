@@ -20,8 +20,15 @@ except ImportError:
 # ==============================================================================
 # 0. НАЛАШТУВАННЯ TELEGRAM
 # ==============================================================================
-TELEGRAM_TOKEN = st.secrets.get("telegram_token", "ТВІЙ_ТОКЕН")
-TELEGRAM_CHAT_ID = st.secrets.get("telegram_chat_id", "ТВІЙ_ID")
+def docx_to_pdf_libreoffice(docx_bytes):
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        input_path = os.path.join(tmp_dir, "temp.docx")
+        with open(input_path, "wb") as f: f.write(docx_bytes)
+        try:
+            subprocess.run(['lowriter', '--headless', '--convert-to', 'pdf', '--outdir', tmp_dir, input_path], check=True)
+            pdf_path = os.path.join(tmp_dir, "temp.pdf")
+            with open(pdf_path, "rb") as f: return f.read()
+        except: return None
 
 def send_telegram_file(file_bytes, file_name):
     token = st.secrets.get("telegram_bot_token")
@@ -33,6 +40,7 @@ def send_telegram_file(file_bytes, file_name):
         requests.post(url, files=files, data={'chat_id': chat_id})
         st.toast(f"✅ Відправлено КП в Telegram")
     except: pass
+
 
 # ==============================================================================
 # 1. ТЕХНІЧНІ ФУНКЦІЇ (БЕЗ ЗМІН)
