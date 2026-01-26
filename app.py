@@ -89,7 +89,6 @@ def apply_font_style(run, size=12, bold=False):
     r.get_or_add_rFonts().set(qn('w:hAnsi'), 'Times New Roman')
 
 def replace_text_in_paragraph(p, reps):
-    """Обробляє один параграф: заміна тегів з дотриманням жирного шрифту до двокрапки."""
     original_text = p.text
     changed = False
     new_text = original_text
@@ -110,12 +109,8 @@ def replace_text_in_paragraph(p, reps):
             apply_font_style(p.add_run(new_text), 12, bold=False)
 
 def replace_with_formatting(doc, reps):
-    """Проходить по всьому документу, включаючи ТАБЛИЦІ."""
-    # 1. Текст поза таблицями
     for p in doc.paragraphs:
         replace_text_in_paragraph(p, reps)
-    
-    # 2. Текст у кожній клітинці кожної таблиці
     for tbl in doc.tables:
         for row in tbl.rows:
             for cell in row.cells:
@@ -152,7 +147,6 @@ def fill_document_table(doc, items, vendor_info, is_fop, is_specification):
         set_cell_style(row_cat.cells[0], cat_name, WD_ALIGN_PARAGRAPH.CENTER, bold=True)
         
         for it in cat_items:
-            # Логіка розрахунку: Специфікація ФОП отримує +6% у рядок
             p_unit = precise_round(it['p'] * 1.06) if (is_fop and is_specification) else precise_round(it['p'])
             row_sum = precise_round(p_unit * it['qty'])
             total_pure += precise_round(it['p'] * it['qty'])
@@ -219,8 +213,8 @@ if EQUIPMENT_BASE:
                 p = cp.number_input("Ціна за од.", 0.0, 1000000.0, float(base_p), key=f"prc_{cat}_{name}")
                 items_to_generate.append({"name": name, "qty": q, "p": p, "cat": cat})
 
+# ПРАВКА ТУТ: Відображення на стрімліт загальної суми
 if items_to_generate:
-    # Розрахунок для прев'ю
     temp_total_pure = sum(it['p'] * it['qty'] for it in items_to_generate)
     temp_tax = temp_total_pure * v['tax_rate']
     temp_grand_total = temp_total_pure + temp_tax
@@ -228,7 +222,6 @@ if items_to_generate:
     st.info(f"💰 **Загальна сума до сплати ({vendor_choice}): {format_num(temp_grand_total)} грн.**")
     
     if st.button("📄 ЗГЕНЕРУВАТИ ДОКУМЕНТИ", use_container_width=True):
-        # Додаємо всі можливі варіанти тегів, які можуть бути в шаблонах
         reps = {
             "vendor_name": v["full"], 
             "vendor_address": v["adr"], 
@@ -239,7 +232,7 @@ if items_to_generate:
             "customer": customer, 
             "address": address, 
             "kp_num": kp_num, 
-            "spec_id_roboti": kp_num, # Тег зі скріншота
+            "spec_id_roboti": kp_num,
             "spec_id_postavka": kp_num,
             "date": date_str, 
             "manager": manager, 
@@ -268,7 +261,7 @@ if items_to_generate:
                     buf = BytesIO()
                     doc.save(buf); buf.seek(0)
                     
-                    # ПРАВКА ТУТ: Нове формування назви для КП
+                    # ПРАВКА ТУТ: Збереження назви комерційної пропозиції - КП_[номер]_[адреса]
                     if label == "КП":
                         filename = f"КП_{kp_num}_{address}.docx"
                     else:
