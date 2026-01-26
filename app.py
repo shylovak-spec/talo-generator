@@ -35,14 +35,13 @@ def format_num(n):
 
 def calculate_row(price_from_st, qty, is_fop):
     """
-    Розрахунок:
-    Якщо ФОП: (Ціна * 1.06) * Кількість
-    Якщо ТОВ: (Ціна * 1.20) * Кількість (бо в базі ціни без ПДВ)
+    Ціна в базі - без податків.
+    ФОП: Ціна + 6% (податкове навантаження)
+    ТОВ: Ціна + 20% (ПДВ)
     """
     if is_fop:
         p_unit = precise_round(price_from_st * 1.06)
     else:
-        # Для ТОВ додаємо 20% ПДВ до ціни з бази
         p_unit = precise_round(price_from_st * 1.20)
     
     row_sum = precise_round(p_unit * qty)
@@ -50,18 +49,12 @@ def calculate_row(price_from_st, qty, is_fop):
 
 def amount_to_text_uk(amount):
     val = precise_round(amount)
-    # Розділяємо на гривні та копійки
     grn = int(val)
     kop = int(round((val - grn) * 100))
-    
     if num2words is None:
         return f"{format_num(val)} грн."
-    
     try:
-        # Перетворюємо в слова тільки цілу частину (гривні)
         words = num2words(grn, lang='uk').capitalize()
-        
-        # Формуємо рядок: Слова гривень, копійки цифрами (з двома знаками, напр. 04 коп)
         return f"{words} гривень, {kop:02d} коп."
     except:
         return f"{format_num(val)} грн."
@@ -183,7 +176,7 @@ def replace_with_formatting(doc, reps):
                             r = p.add_run(txt)
                             apply_font_style(r, 12)
 
-def fill_document_table(doc, items, tax_label, tax_rate, is_fop):
+def fill_document_table(doc, items, tax_label, tax_rate, is_fop, is_specification=False):
     target_table = None
     for tbl in doc.tables:
         if any("Найменування" in cell.text for cell in tbl.rows[0].cells):
@@ -215,22 +208,29 @@ def fill_document_table(doc, items, tax_label, tax_rate, is_fop):
                 set_cell_style(r.cells[2], format_num(p_unit), WD_ALIGN_PARAGRAPH.RIGHT)
                 set_cell_style(r.cells[3], format_num(row_sum), WD_ALIGN_PARAGRAPH.RIGHT)
 
-    if is_fop:
+    # ЛОГІКА ПІДСУМКІВ
+    if is_fop and is_specification:
+        # Для ФОП Специфікація: тільки один рядок Загальна сума
         f_row = target_table.add_row()
         f_row.cells[0].merge(f_row.cells[cols-2])
         set_cell_style(f_row.cells[0], "ЗАГАЛЬНА СУМА, грн:", WD_ALIGN_PARAGRAPH.LEFT, True)
         set_cell_style(f_row.cells[cols-1], format_num(grand_total), WD_ALIGN_PARAGRAPH.RIGHT, True)
     else:
-        # Логіка для ТОВ: виводимо чисту суму бази та розраховане ПДВ
+        # Для ТОВ (завжди) та для ФОП (тільки в КП): виділяємо податок/навантаження
         pure_total_no_tax = 0
         for it in items:
             pure_total_no_tax += precise_round(it['p'] * it['qty'])
         
         tax_amount = precise_round(grand_total - pure_total_no_tax)
         
-        f_rows = [("РАЗОМ (без ПДВ), грн:", pure_total_no_tax, False), 
-                  (f"{tax_label}:", tax_amount, False), 
-                  ("ЗАГАЛЬНА СУМА, грн:", grand_total, True)]
+        label_no_tax = "РАЗОМ (без ПДВ), грн:" if not is_fop else "РАЗОМ (без навантаження), грн:"
+        label_tax = f"{tax_label}:" if not is_fop else "Податкове навантаження 6%:"
+        
+        f_rows = [
+            (label_no_tax, pure_total_no_tax, False), 
+            (label_tax, tax_amount, False), 
+            ("ЗАГАЛЬНА СУМА, грн:", grand_total, True)
+        ]
         for label, val, is_bold in f_rows:
             r = target_table.add_row()
             r.cells[0].merge(r.cells[cols-2])
@@ -286,14 +286,12 @@ if EQUIPMENT_BASE:
                 items_to_generate.append({"name": name, "qty": q, "p": p, "cat": cat})
 
 if items_to_generate:
-    # --- ВІДОБРАЖЕННЯ ЗАГАЛЬНОЇ СУМИ НА СТОРІНЦІ ---
     current_total = 0
     for it in items_to_generate:
         _, s_row = calculate_row(it['p'], it['qty'], is_fop)
         current_total += s_row
     
-    st.info(f"💰 **Загальна сума до сплати: {format_num(current_total)} грн.**")
-    # -----------------------------------------------
+    st.info(f"💰 **Загальна сума до сплати ({'ФОП +6%' if is_fop else 'ТОВ +20% ПДВ'}): {format_num(current_total)} грн.**")
 
     st.write("---")
     c_gen, c_tg = st.columns(2)
@@ -304,7 +302,6 @@ if items_to_generate:
                 "address": address, "kp_num": kp_num, "date": date_str, "manager": manager, "phone": phone, "email": email,
                 "txt_intro": txt_intro, "line1": l1, "line2": l2, "line3": l3, "spec_id_postavka": kp_num, "spec_id_roboti": kp_num}
         
-        # Реєстр
         try:
             creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"])
             gspread.authorize(creds).open("Реєстр КП Talo").get_worksheet(0).append_row([date_str, kp_num, customer, address, vendor_choice, current_total, manager])
@@ -322,7 +319,10 @@ if items_to_generate:
                 if "РОБ" in label: it_fill = [i for i in items_to_generate if "роботи" in i["cat"].lower()]
                 
                 if it_fill:
-                    actual_total = fill_document_table(doc, it_fill, v['tax_label'], v['tax_rate'], is_fop)
+                    # Перевіряємо, чи це специфікація
+                    is_spec = "Специфікація" in label
+                    actual_total = fill_document_table(doc, it_fill, v['tax_label'], v['tax_rate'], is_fop, is_specification=is_spec)
+                    
                     reps["total_sum_digits"] = format_num(actual_total)
                     reps["total_sum_words"] = amount_to_text_uk(actual_total)
                     replace_with_formatting(doc, reps)
