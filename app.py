@@ -23,7 +23,9 @@ except ImportError:
 # 0. НАЛАШТУВАННЯ TELEGRAM ТА PDF
 # ==============================================================================
 TELEGRAM_TOKEN = st.secrets.get("telegram_token", "ТВІЙ_ТОКЕН")
-TELEGRAM_CHAT_ID = st.secrets.get("telegram_chat_id", "ТВІЙ_ID")
+# Отримуємо ID як рядок, розділяємо по комі та прибираємо зайві пробіли
+raw_chat_ids = str(st.secrets.get("telegram_chat_id", "")).split(",")
+TELEGRAM_CHAT_IDS = [cid.strip() for cid in raw_chat_ids if cid.strip()]
 
 def docx_to_pdf(docx_data):
     """Конвертує docx (BytesIO) в pdf (bytes) за допомогою LibreOffice."""
@@ -33,41 +35,58 @@ def docx_to_pdf(docx_data):
             f.write(docx_data.getvalue())
         
         try:
-            subprocess.run([
+            # На Streamlit Cloud важливо вказати Home для LibreOffice
+            env = os.environ.copy()
+            env["HOME"] = tmpdir
+            
+            result = subprocess.run([
                 "lowriter", "--headless", "--convert-to", "pdf",
                 "--outdir", tmpdir, input_path
-            ], check=True, capture_output=True)
+            ], check=True, capture_output=True, env=env)
             
             pdf_path = os.path.join(tmpdir, "file.pdf")
-            with open(pdf_path, "rb") as f:
-                return f.read()
+            if os.path.exists(pdf_path):
+                with open(pdf_path, "rb") as f:
+                    return f.read()
+            else:
+                st.error(f"LibreOffice не створив файл: {result.stderr.decode()}")
+                return None
         except Exception as e:
             st.error(f"Помилка PDF конвертації: {e}")
             return None
 
 def send_to_telegram(files_dict, message_text):
-    """Відправляє згенеровані файли (конвертовані в PDF) в Telegram чат."""
-    success = True
-    for label, info in files_dict.items():
-        try:
-            # Конвертуємо в PDF перед відправкою
-            pdf_bytes = docx_to_pdf(info['data'])
-            if not pdf_bytes:
-                success = False
-                continue
+    """Відправляє згенеровані PDF файли всім отримувачам."""
+    if not TELEGRAM_CHAT_IDS:
+        st.error("Помилка: Список Chat ID порожній!")
+        return False
 
-            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendDocument"
-            pdf_name = info['name'].replace(".docx", ".pdf")
-            files = {'document': (pdf_name, pdf_bytes)}
-            data = {'chat_id': TELEGRAM_CHAT_ID, 'caption': message_text if label == "КП" else ""}
-            
-            response = requests.post(url, data=data, files=files)
-            if not response.ok:
-                success = False
-        except Exception as e:
-            st.error(f"Помилка відправки {label}: {e}")
-            success = False
-    return success
+    all_success = True
+    for chat_id in TELEGRAM_CHAT_IDS:
+        for label, info in files_dict.items():
+            try:
+                # Конвертуємо в PDF
+                pdf_bytes = docx_to_pdf(info['data'])
+                if not pdf_bytes:
+                    all_success = False
+                    continue
+
+                url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendDocument"
+                pdf_name = info['name'].replace(".docx", ".pdf")
+                
+                # Важливо: створюємо новий файл для кожного запиту
+                files = {'document': (pdf_name, pdf_bytes)}
+                data = {'chat_id': chat_id, 'caption': message_text if label == "КП" else ""}
+                
+                response = requests.post(url, data=data, files=files, timeout=30)
+                
+                if not response.ok:
+                    st.error(f"Помилка Telegram (ID: {chat_id}): {response.text}")
+                    all_success = False
+            except Exception as e:
+                st.error(f"Критична помилка відправки: {e}")
+                all_success = False
+    return all_success
 
 # ==============================================================================
 # 1. ТЕХНІЧНІ ФУНКЦІЇ (БЕЗ ЗМІН)
