@@ -56,36 +56,44 @@ def docx_to_pdf(docx_data):
             return None
 
 def send_to_telegram(files_dict, message_text):
-    """Відправляє згенеровані PDF файли всім отримувачам."""
+    """Відправляє ТІЛЬКИ файл КП (конвертований в PDF) в Telegram чат."""
     if not TELEGRAM_CHAT_IDS:
         st.error("Помилка: Список Chat ID порожній!")
         return False
 
     all_success = True
+    
+    # Шукаємо тільки файл з ключем "КП"
+    if "КП" not in files_dict:
+        st.error("Помилка: Файл КП не знайдено серед згенерованих документів.")
+        return False
+        
+    info = files_dict["КП"]
+    
     for chat_id in TELEGRAM_CHAT_IDS:
-        for label, info in files_dict.items():
-            try:
-                # Конвертуємо в PDF
-                pdf_bytes = docx_to_pdf(info['data'])
-                if not pdf_bytes:
-                    all_success = False
-                    continue
-
-                url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendDocument"
-                pdf_name = info['name'].replace(".docx", ".pdf")
-                
-                # Важливо: створюємо новий файл для кожного запиту
-                files = {'document': (pdf_name, pdf_bytes)}
-                data = {'chat_id': chat_id, 'caption': message_text if label == "КП" else ""}
-                
-                response = requests.post(url, data=data, files=files, timeout=30)
-                
-                if not response.ok:
-                    st.error(f"Помилка Telegram (ID: {chat_id}): {response.text}")
-                    all_success = False
-            except Exception as e:
-                st.error(f"Критична помилка відправки: {e}")
+        try:
+            # Конвертуємо в PDF
+            pdf_bytes = docx_to_pdf(info['data'])
+            if not pdf_bytes:
                 all_success = False
+                continue
+
+            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendDocument"
+            pdf_name = info['name'].replace(".docx", ".pdf")
+            
+            files = {'document': (pdf_name, pdf_bytes)}
+            data = {'chat_id': chat_id, 'caption': message_text}
+            
+            response = requests.post(url, data=data, files=files, timeout=30)
+            
+            if not response.ok:
+                st.error(f"Помилка Telegram (ID: {chat_id}): {response.text}")
+                all_success = False
+                
+        except Exception as e:
+            st.error(f"Критична помилка відправки для ID {chat_id}: {e}")
+            all_success = False
+            
     return all_success
 
 # ==============================================================================
